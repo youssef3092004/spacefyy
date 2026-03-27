@@ -1,0 +1,780 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+  CUSTOMER
+  OWNER
+  DEVELOPER
+}
+
+enum PaymentMethod {
+  CASH
+  BANK
+  INSTAPAY
+  CARD
+}
+
+enum ApprovalSource {
+  SYSTEM
+  USER
+}
+
+enum PayrollStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum Language {
+  EN
+  AR
+}
+
+enum SpaceType {
+  PRIVATE
+  PUBLIC
+  DESK
+  MEETING
+  VIP
+  OTHER
+}
+
+enum DeviceType {
+  PC
+  LAPTOP
+  PS4_2
+  PS4_4
+  PS5_2
+  PS5_4
+  XBOX_ONE
+  XBOX_SERIES_S
+  XBOX_SERIES_X
+  NINTENDO_SWITCH
+  VR_HEADSET
+  SIMULATOR
+  TV
+  PROJECTOR
+  TABLET
+  SMART_BOARD
+  SOUND_SYSTEM
+  CAMERA
+  MICROPHONE
+  OTHER
+}
+
+enum ToolType {
+  CONTROLLER
+  HEADSET
+  STEERING_WHEEL
+  PEDALS
+  PING_PONG
+  BILLIARDO
+  BOARD_GAME
+  OTHER
+}
+
+enum PricingType {
+  PER_HOUR
+  PER_SESSION
+  PER_GAME
+}
+
+enum PricingMode {
+  TIME_RANGE
+  PER_HOUR
+  FIXED_PRICE
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum PlanType {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum VisitStatus {
+  ACTIVE
+  CLOSED
+  INVOICED
+  PAID
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+}
+
+enum SessionResourceType {
+  SPACE
+  DEVICE
+  TOOL
+}
+
+enum SessionStatus {
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+// fix it to branch not business
+model BusinessSettings {
+  id         String @id @default(uuid())
+  businessId String @unique
+
+  defaultLanguage      Language @default(EN)
+  notificationsEnabled Boolean  @default(true)
+  autoApprovePayroll   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id           String   @id @default(uuid())
+  roleId       String?
+  name         String
+  phone        String   @unique
+  email        String   @unique
+  password     String
+  profileImage String?  @default("https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role                  Role?                  @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  userPermissions       UserPermission[]
+  businesses            Business[]
+  staffProfile          StaffProfile?
+  payrolls              Payroll[]
+  BranchUserPermissions BranchUserPermission[]
+  sessionsCreated       Session[]              @relation("SessionCreatedBy")
+  sessionsEnded         Session[]              @relation("SessionEndedBy")
+  sessionsCanceled      Session[]              @relation("SessionCanceledBy")
+  sessionsDeleted       Session[]              @relation("SessionDeletedBy")
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([roleId])
+  @@index([phone])
+  @@index([email])
+  @@index([createdAt])
+  @@index([name])
+}
+
+model StaffProfile {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  branchId   String
+  baseSalary Float
+  hireDate   DateTime
+  position   String
+  department String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch     Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  payrolls   Payroll[]
+  nationalId NationalId?
+
+  @@index([branchId])
+  @@index([branchId, createdAt])
+  @@index([position])
+  @@index([department])
+}
+
+model NationalId {
+  id             String       @id @default(uuid())
+  number         String       @unique
+  frontImage     String
+  backImage      String
+  staffProfileId String       @unique
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@index([number])
+  @@index([staffProfileId])
+}
+
+model BranchUserPermission {
+  id           String   @id @default(uuid())
+  branchId     String
+  userId       String
+  permissionId String
+  isAllowed    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  branch     Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, userId, permissionId])
+  @@index([isAllowed])
+  @@index([branchId])
+  @@index([userId])
+  @@index([userId, branchId])
+  @@index([permissionId])
+}
+
+model Payroll {
+  id             String @id @default(uuid())
+  staffProfileId String
+
+  grossSalary Decimal @db.Decimal(12, 2) // baseSalary + bonus + overtime
+  bonus       Decimal @db.Decimal(12, 2)
+  overtime    Decimal @default(0)
+  deductions  Decimal @default(0)
+  netSalary   Decimal // grossSalary - deductions
+
+  method PaymentMethod
+  status PayrollStatus @default(PENDING)
+
+  month Int
+  year  Int
+
+  approvedById String?
+  approvedAt   DateTime?
+  paidAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  staffProfile StaffProfile @relation(fields: [staffProfileId], references: [id])
+  approvedBy   User?        @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([staffProfileId, month, year])
+  @@index([status])
+  @@index([month, year])
+  @@index([approvedById])
+  @@index([staffProfileId])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        UserRole @unique
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles                 RolePermission[]
+  userPermissions       UserPermission[]
+  BranchUserPermissions BranchUserPermission[]
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@index([roleId, permissionId])
+}
+
+model UserPermission {
+  id           String   @id @default(uuid())
+  userId       String
+  permissionId String
+  isAllowed    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  @@index([isAllowed])
+  @@index([userId])
+  @@index([permissionId])
+}
+
+model Business {
+  id        String   @id @default(uuid())
+  name      String
+  ownerId   String
+  planId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  plan             Plan              @relation(fields: [planId], references: [id])
+  // subscriptions Subscription[]
+  branches         Branch[]
+  businessSettings BusinessSettings?
+  storageUsage     StorageUsage?
+  customers        Customer[]
+
+  @@index([ownerId])
+}
+
+model Branch {
+  id          String    @id @default(uuid())
+  businessId  String
+  name        String
+  address     String
+  image       String    @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  isActive    Boolean   @default(true)
+  openingTime DateTime?
+  closingTime DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  staffProfiles         StaffProfile[]
+  spaces                Space[]
+  devices               Device[]
+  tools                 Tool[]
+  BranchUserPermissions BranchUserPermission[]
+  visits                Visit[]
+  sessions              Session[]
+  pricingRules          PricingRule[]
+  products              Product[]
+
+  @@index([businessId])
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model BlacklistedToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiredAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Space {
+  id              String    @id @default(uuid())
+  branchId        String
+  name            String
+  type            SpaceType
+  customTypeLabel String?
+  image           String    @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  capacity        Int
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  devices      Device[]
+  pricingRules PricingRule[]
+  tools        Tool[]
+
+  @@index([branchId])
+}
+
+model Device {
+  id              String      @id @default(uuid())
+  branchId        String
+  spaceId         String?
+  type            DeviceType
+  customTypeLabel String?
+  image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  priceType       PricingType @default(PER_HOUR)
+  price           Decimal     @default(0) @db.Decimal(12, 2)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  space        Space?        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  pricingRules PricingRule[]
+
+  @@index([branchId])
+  @@index([branchId, type])
+  @@index([spaceId])
+}
+
+model Tool {
+  id       String @id @default(uuid())
+  branchId String
+  spaceId  String
+
+  name            String
+  type            ToolType
+  customTypeLabel String?
+  image           String   @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  pricePerSession Decimal  @db.Decimal(10, 2)
+  isActive        Boolean  @default(true)
+
+  /**
+   * 🧾 Audit fields
+   */
+  createdBy String
+  updatedBy String
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  space        Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  pricingRules PricingRule[]
+
+  @@index([branchId])
+  @@index([deletedAt])
+  @@index([branchId, isActive, deletedAt])
+}
+
+model PricingRule {
+  id       String @id @default(uuid())
+  branchId String
+  name     String
+
+  pricingType PricingType
+
+  minDurationMinutes Int?
+  maxDurationMinutes Int?
+
+  minPlayers Int?
+  maxPlayers Int?
+
+  price    Decimal @db.Decimal(10, 2)
+  currency String  @default("EGP")
+  priority Int     @default(0)
+
+  isActive    Boolean     @default(true)
+  pricingMode PricingMode @default(TIME_RANGE)
+
+  // Target (ONLY ONE should be set)
+  spaceId  String?
+  deviceId String?
+  toolId   String?
+
+  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  space    Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  device   Device?   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  tool     Tool?     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  visits   Visit[]
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([spaceId])
+  @@index([deviceId])
+  @@index([toolId])
+  @@index([isActive])
+  @@index([pricingType])
+  @@index([pricingMode])
+  @@index([priority])
+  @@index([spaceId, pricingMode])
+  @@index([deviceId, pricingMode])
+  @@index([toolId, pricingMode])
+  @@index([spaceId, isActive])
+  @@index([deviceId, isActive])
+  @@index([toolId, isActive])
+  @@index([spaceId, isActive, priority])
+  @@index([deviceId, isActive, priority])
+  @@index([toolId, isActive, priority])
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  type        PlanType
+  description String?
+
+  price           Decimal         @db.Decimal(10, 2)
+  currency        String          @default("EGP")
+  billingInterval BillingInterval @default(MONTHLY)
+  trialDays       Int?
+
+  isActive Boolean @default(true)
+  isPublic Boolean @default(true)
+
+  maxStaff    Int?
+  maxBranches Int?
+  maxSpaces   Int?
+  maxDevices  Int?
+  maxTools    Int?
+  maxUsers    Int?
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  businesses Business[]
+
+  @@index([isActive])
+  @@index([billingInterval])
+}
+
+// 📊 Storage & Resource Usage Tracking
+model StorageUsage {
+  id         String @id @default(uuid())
+  businessId String @unique
+
+  // Current Usage (actual)
+  currentBranches Int @default(0)
+  currentSpaces   Int @default(0)
+  currentDevices  Int @default(0)
+  currentTools    Int @default(0)
+  currentStaff    Int @default(0)
+  currentUsers    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  history  StorageUsageHistory[]
+
+  @@index([businessId])
+}
+
+// 📈 Historical snapshots for analytics
+model StorageUsageHistory {
+  id             String @id @default(uuid())
+  storageUsageId String
+
+  // Snapshot data
+  branches Int
+  spaces   Int
+  devices  Int
+  tools    Int
+  staff    Int
+  users    Int
+
+  recordedAt DateTime @default(now())
+
+  storageUsage StorageUsage @relation(fields: [storageUsageId], references: [id], onDelete: Cascade)
+
+  @@index([storageUsageId])
+  @@index([recordedAt])
+}
+
+model Customer {
+  id         String   @id @default(uuid())
+  businessId String
+  seqNumber  Int
+  name       String
+  phone      String
+  email      String?
+  password   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  visits   Visit[]
+
+  @@unique([businessId, seqNumber])
+  @@unique([businessId, phone])
+  @@unique([businessId, email])
+  @@unique([businessId, email, phone])
+  @@index([businessId])
+  @@index([phone])
+  @@index([email])
+}
+
+model Visit {
+  id            String       @id @default(uuid())
+  branchId      String
+  customerId    String
+  pricingRuleId String?
+  pricingMode   PricingMode?
+  unitPrice     Decimal?     @db.Decimal(10, 2)
+  totalPrice    Decimal?     @db.Decimal(10, 2)
+  startedAt     DateTime
+  endedAt       DateTime?
+
+  status VisitStatus
+
+  durationMinutes Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
+  invoice     Invoice?
+  sessions    Session[]
+  orders      Order[]
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([pricingRuleId])
+  @@index([branchId, status])
+  @@index([branchId, customerId, startedAt])
+}
+
+model Invoice {
+  id          String        @id @default(uuid())
+  visitId     String        @unique
+  totalAmount Decimal       @db.Decimal(12, 2)
+  status      InvoiceStatus @default(UNPAID)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  paidAt      DateTime?
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Session {
+  id String @id @default(uuid())
+
+  branchId  String
+  visitId   String
+  bookingId String?
+
+  resourceType SessionResourceType
+  resourceId   String
+
+  pricingRuleId String
+
+  unitPrice  Decimal @db.Decimal(10, 2)
+  totalPrice Decimal @db.Decimal(10, 2)
+  currency   String  @default("EGP")
+
+  startedAt DateTime
+  endedAt   DateTime?
+
+  durationMinutes Int?
+
+  status SessionStatus @default(ACTIVE)
+
+  createdById  String
+  endedById    String?
+  canceledById String?
+  deletedById  String?
+  deletedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch      Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  visit       Visit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  pricingRule PricingRule @relation(fields: [pricingRuleId], references: [id], onDelete: Restrict)
+  createdBy   User        @relation("SessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  endedBy     User?       @relation("SessionEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
+  canceledBy  User?       @relation("SessionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+  deletedBy   User?       @relation("SessionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  @@index([branchId])
+  @@index([visitId])
+  @@index([resourceId])
+  @@index([status])
+  @@index([pricingRuleId])
+  @@index([bookingId])
+  @@index([startedAt])
+  @@index([createdById])
+  @@index([endedById])
+  @@index([canceledById])
+  @@index([deletedById])
+  @@index([deletedAt])
+  @@index([resourceType, resourceId])
+  @@index([branchId, status])
+  @@index([branchId, status, deletedAt])
+  @@index([visitId, branchId, deletedAt])
+}
+
+model CategoryProduct {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+
+  @@index([createdAt])
+}
+
+model Product {
+  id         String      @id @default(uuid())
+  categoryId String
+  branchId   String
+  name       String
+  price      Decimal     @db.Decimal(10, 2)
+  quantity   Int
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  orderItems OrderItem[]
+
+  category CategoryProduct @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  branch   Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([name, branchId])
+  @@index([isActive])
+  @@index([categoryId])
+  @@index([branchId])
+  @@index([createdAt])
+  @@index([name])
+  @@index([branchId, isActive])
+  @@index([branchId, isActive, createdAt])
+  @@index([branchId, categoryId])
+  @@index([branchId, categoryId, isActive])
+}
+
+model Order {
+  id         String   @id @default(uuid())
+  visitId    String
+  number     Int      @default(1)
+  totalPrice Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  visit      Visit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([visitId, number])
+  @@index([visitId])
+  @@index([createdAt])
+  @@index([visitId, createdAt])
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  totalPrice Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([createdAt])
+}
