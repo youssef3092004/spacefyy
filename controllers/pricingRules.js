@@ -38,7 +38,8 @@ export const createPricingRule = async (req, res, next) => {
       pricingMode,
       spaceId,
       deviceId,
-      toolId,
+      unitId,
+      equipmentId,
     } = req.body;
     const normalizedPricingMode = normalizePricingMode(pricingMode);
 
@@ -87,17 +88,19 @@ export const createPricingRule = async (req, res, next) => {
     await validateTargetOwnership(prisma, branchId, {
       spaceId,
       deviceId,
-      toolId,
+      unitId,
+      equipmentId,
     });
-    const targetField = ensureSingleTarget({ spaceId, deviceId, toolId });
+    const targetField = ensureSingleTarget({ spaceId, deviceId, unitId, equipmentId });
 
     const existingRule = await prisma.pricingRule.findFirst({
       where: {
-        OR: [{ spaceId }, { deviceId }, { toolId }],
+        OR: [{ spaceId }, { deviceId }, { unitId }, { equipmentId }],
         name,
         space: spaceId ? { branchId } : undefined,
         device: deviceId ? { branchId } : undefined,
-        tool: toolId ? { branchId } : undefined,
+        unit: unitId ? { branchId } : undefined,
+        equipment: equipmentId ? { branchId } : undefined,
       },
     });
     if (existingRule) {
@@ -111,7 +114,7 @@ export const createPricingRule = async (req, res, next) => {
 
     const overlapCandidates = await prisma.pricingRule.findMany({
       where: {
-        [targetField]: { equals: { spaceId, deviceId, toolId }[targetField] },
+        [targetField]: { equals: { spaceId, deviceId, unitId, equipmentId }[targetField] },
         pricingMode: normalizedPricingMode,
       },
     });
@@ -123,7 +126,8 @@ export const createPricingRule = async (req, res, next) => {
         maxDurationMinutes,
         spaceId,
         deviceId,
-        toolId,
+        unitId,
+        equipmentId,
       },
       overlapCandidates,
     );
@@ -143,7 +147,8 @@ export const createPricingRule = async (req, res, next) => {
         branchId,
         spaceId,
         deviceId,
-        toolId,
+        unitId,
+        equipmentId,
       },
     });
 
@@ -169,7 +174,8 @@ export const getPricingRuleById = async (req, res, next) => {
       include: {
         space: { select: { branchId: true } },
         device: { select: { branchId: true } },
-        tool: { select: { branchId: true } },
+        unit: { select: { branchId: true } },
+        equipment: { select: { branchId: true } },
       },
     });
 
@@ -217,7 +223,8 @@ export const getPriceingRulesByTarget = async (req, res, next) => {
     const includeObj = {
       space: target === "space" ? { select: { branchId: true } } : false,
       device: target === "device" ? { select: { branchId: true } } : false,
-      tool: target === "tool" ? { select: { branchId: true } } : false,
+      unit: target === "unit" ? { select: { branchId: true } } : false,
+      equipment: target === "equipment" ? { select: { branchId: true } } : false,
     };
 
     const pricingRules = await prisma.pricingRule.findMany({
@@ -261,11 +268,11 @@ export const getAllPricingRules = async (req, res, next) => {
     }
 
     const { page, limit, skip, order, sort } = pagination(req);
-    const { spaceId, deviceId, toolId, isActive, pricingMode, pricingType } =
+    const { spaceId, deviceId, unitId, equipmentId, isActive, pricingMode, pricingType } =
       req.query;
     const normalizedPricingMode = normalizePricingMode(pricingMode);
 
-    const targets = [spaceId, deviceId, toolId].filter(Boolean);
+    const targets = [spaceId, deviceId, unitId, equipmentId].filter(Boolean);
     if (targets.length > 1) {
       return next(new AppError("Only one target filter allowed", 400));
     }
@@ -313,19 +320,25 @@ export const getAllPricingRules = async (req, res, next) => {
         ...baseFilters,
         device: { branchId },
       };
-    } else if (toolId) {
+    } else if (unitId) {
       where = {
-        toolId,
+        unitId,
         ...baseFilters,
-        tool: { branchId },
+        unit: { branchId },
+      };
+    } else if (equipmentId) {
+      where = {
+        equipmentId,
+        ...baseFilters,
+        equipment: { branchId },
       };
     } else {
-      // Only use OR if absolutely needed
       where = {
         OR: [
           { space: { branchId } },
           { device: { branchId } },
-          { tool: { branchId } },
+          { unit: { branchId } },
+          { equipment: { branchId } },
         ],
         ...baseFilters,
       };
@@ -377,7 +390,8 @@ export const updatePricingRuleById = async (req, res, next) => {
       "pricingMode",
       "spaceId",
       "deviceId",
-      "toolId",
+      "unitId",
+      "equipmentId",
     ];
     const updates = { ...req.body };
     const validUpdates = Object.keys(updates).filter((update) =>
@@ -397,7 +411,8 @@ export const updatePricingRuleById = async (req, res, next) => {
       include: {
         space: { select: { branchId: true } },
         device: { select: { branchId: true } },
-        tool: { select: { branchId: true } },
+        unit: { select: { branchId: true } },
+        equipment: { select: { branchId: true } },
       },
     });
 
@@ -462,11 +477,11 @@ export const updatePricingRuleById = async (req, res, next) => {
       spaceId:
         updates.spaceId !== undefined ? updates.spaceId : existingRule.spaceId,
       deviceId:
-        updates.deviceId !== undefined
-          ? updates.deviceId
-          : existingRule.deviceId,
-      toolId:
-        updates.toolId !== undefined ? updates.toolId : existingRule.toolId,
+        updates.deviceId !== undefined ? updates.deviceId : existingRule.deviceId,
+      unitId:
+        updates.unitId !== undefined ? updates.unitId : existingRule.unitId,
+      equipmentId:
+        updates.equipmentId !== undefined ? updates.equipmentId : existingRule.equipmentId,
     };
 
     validatePricingConsistency(nextRuleState);
@@ -480,7 +495,8 @@ export const updatePricingRuleById = async (req, res, next) => {
       await validateTargetOwnership(prisma, branchId, {
         spaceId: nextRuleState.spaceId,
         deviceId: nextRuleState.deviceId,
-        toolId: nextRuleState.toolId,
+        unitId: nextRuleState.unitId,
+        equipmentId: nextRuleState.equipmentId,
       });
     }
 
@@ -524,7 +540,9 @@ export const updatePricingByTarget = async (req, res, next) => {
       where: {
         id: targetId,
         branchId,
-        ...(target === "tool" ? { deletedAt: null } : { isActive: true }),
+        ...(target === "unit" || target === "equipment"
+          ? { isDeleted: false }
+          : { isActive: true }),
       },
       select: { id: true },
     });
@@ -664,7 +682,8 @@ export const deletePricingRuleById = async (req, res, next) => {
       include: {
         space: { select: { branchId: true } },
         device: { select: { branchId: true } },
-        tool: { select: { branchId: true } },
+        unit: { select: { branchId: true } },
+        equipment: { select: { branchId: true } },
       },
     });
 
@@ -725,7 +744,9 @@ export const deletePricingRuleByTarget = async (req, res, next) => {
       where: {
         id: targetId,
         branchId,
-        ...(target === "tool" ? { deletedAt: null } : { isActive: true }),
+        ...(target === "unit" || target === "equipment"
+          ? { isDeleted: false }
+          : { isActive: true }),
       },
       select: { id: true },
     });
@@ -771,6 +792,105 @@ export const deletePricingRuleByTarget = async (req, res, next) => {
       status: "success",
       message: "Pricing rules deleted successfully",
       meta: { deleted: deleteResult.count },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getBranchPricingPanel = async (req, res, next) => {
+  try {
+    const { branchId } = req.params;
+    if (!branchId) {
+      return next(new AppError("Branch ID is required", 400));
+    }
+
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { id: true, name: true },
+    });
+
+    if (!branch) {
+      return next(new AppError("Branch not found", 404));
+    }
+
+    
+
+    const [spaces, devices, units, equipment] = await prisma.$transaction([
+      prisma.space.findMany({
+        where: { branchId },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          isActive: true,
+          priceType: true,
+          price: true,
+        },
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      }),
+      prisma.device.findMany({
+        where: { branchId },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          customTypeLabel: true,
+          isActive: true,
+          priceType: true,
+          price: true,
+          spaceId: true,
+        },
+        orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
+      }),
+      prisma.unit.findMany({
+        where: { branchId, isDeleted: false },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          customTypeLabel: true,
+          isActive: true,
+          priceType: true,
+          price: true,
+          spaceId: true,
+        },
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      }),
+      prisma.equipment.findMany({
+        where: { branchId, isDeleted: false },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          customTypeLabel: true,
+          isActive: true,
+          priceType: true,
+          price: true,
+          spaceId: true,
+          unitId: true,
+          quantity: true,
+        },
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      }),
+    ]);
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        branch,
+        spaces,
+        devices,
+        units,
+        equipment,
+      },
+      meta: {
+        spaces: spaces.length,
+        devices: devices.length,
+        units: units.length,
+        equipment: equipment.length,
+      },
+      source: "database",
     });
   } catch (error) {
     next(error);

@@ -182,7 +182,8 @@ export const getAllBusinessesStorageUsage = async (req, res, next) => {
                 maxBranches: true,
                 maxSpaces: true,
                 maxDevices: true,
-                maxTools: true,
+                maxUnits: true,
+                maxEquipment: true,
                 maxUsers: true,
               },
             },
@@ -222,11 +223,18 @@ export const getAllBusinessesStorageUsage = async (req, res, next) => {
               (usage.currentDevices / (plan.maxDevices || 1)) * 100,
             ),
           },
-          tools: {
-            current: usage.currentTools,
-            max: plan.maxTools,
+          units: {
+            current: usage.currentUnits,
+            max: plan.maxUnits,
             percent: Math.round(
-              (usage.currentTools / (plan.maxTools || 1)) * 100,
+              (usage.currentUnits / (plan.maxUnits || 1)) * 100,
+            ),
+          },
+          equipment: {
+            current: usage.currentEquipment,
+            max: plan.maxEquipment,
+            percent: Math.round(
+              (usage.currentEquipment / (plan.maxEquipment || 1)) * 100,
             ),
           },
           staff: {

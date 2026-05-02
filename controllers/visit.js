@@ -1,52 +1,88 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
-import {
-  freezePricingAtSessionStart,
-  freezePricingAtSessionClose,
-} from "../utils/visitPricingSnapshot.js";
+import { pagination } from "../utils/pagination.js";
 import {
   ensureCanStartVisit,
   ensureCanModifyAnything,
   ensureCanModifySession,
 } from "../utils/visitStatusLock.js";
 
-const resolveRuleBranchId = (pricingRule) => {
-  return (
-    pricingRule?.space?.branchId ||
-    pricingRule?.device?.branchId ||
-    pricingRule?.tool?.branchId ||
-    null
-  );
+const VisitStatus = ["ACTIVE", "CLOSED", "INVOICED", "PAID"];
+
+const visitSelect = {
+  id: true,
+  branchId: true,
+  customerId: true,
+  pricingRuleId: true,
+  pricingMode: true,
+  totalPrice: true,
+  startedAt: true,
+  endedAt: true,
+  status: true,
+  durationMinutes: true,
+  createdAt: true,
+  updatedAt: true,
 };
 
-const resolveSingleTarget = ({ spaceId, deviceId, toolId }) => {
-  const targets = [
-    { field: "spaceId", value: spaceId },
-    { field: "deviceId", value: deviceId },
-    { field: "toolId", value: toolId },
-  ].filter((target) => Boolean(target.value));
+export const getAllByBranchId = async (req, res, next) => {
+  try {
+    const { branchId } = req.params;
+    if (!branchId) {
+      return next(new AppError("Branch ID is required", 400));
+    }
 
-  if (targets.length !== 1) {
-    throw new AppError(
-      "Exactly one target is required when resolving pricing rule (spaceId, deviceId, toolId)",
-      400,
-    );
+    const { page, limit, skip, sort, order } = pagination(req);
+
+    const normalizedStatus = req.query.status
+      ? String(req.query.status).toUpperCase()
+      : undefined;
+
+    if (normalizedStatus && !VisitStatus.includes(normalizedStatus)) {
+      return next(new AppError("Invalid visit status", 400));
+    }
+
+    const where = {
+      branchId,
+      ...(normalizedStatus ? { status: normalizedStatus } : {}),
+    };
+
+    const [branch, visits, total] = await Promise.all([
+      prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { id: true },
+      }),
+      prisma.visit.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { [sort]: order },
+        select: visitSelect,
+      }),
+      prisma.visit.count({ where }),
+    ]);
+
+    if (!branch) {
+      return next(new AppError("Branch not found", 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: visits,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(error);
   }
-
-  return targets[0];
 };
 
 export const startVisit = async (req, res, next) => {
   try {
-    const {
-      branchId,
-      customerId,
-      pricingRuleId,
-      spaceId,
-      deviceId,
-      toolId,
-      startedAt,
-    } = req.body;
+    const { branchId, customerId, startedAt } = req.body;
 
     if (!branchId || !customerId) {
       return next(new AppError("branchId and customerId are required", 400));
@@ -79,54 +115,7 @@ export const startVisit = async (req, res, next) => {
       return next(new AppError("Customer not found", 404));
     }
 
-    let pricingRule;
-
-    if (pricingRuleId) {
-      pricingRule = await prisma.pricingRule.findUnique({
-        where: { id: pricingRuleId },
-        include: {
-          space: { select: { branchId: true } },
-          device: { select: { branchId: true } },
-          tool: { select: { branchId: true } },
-        },
-      });
-    } else {
-      const target = resolveSingleTarget({ spaceId, deviceId, toolId });
-
-      pricingRule = await prisma.pricingRule.findFirst({
-        where: {
-          isActive: true,
-          [target.field]: target.value,
-          ...(target.field === "spaceId" ? { space: { branchId } } : {}),
-          ...(target.field === "deviceId" ? { device: { branchId } } : {}),
-          ...(target.field === "toolId" ? { tool: { branchId } } : {}),
-        },
-        include: {
-          space: { select: { branchId: true } },
-          device: { select: { branchId: true } },
-          tool: { select: { branchId: true } },
-        },
-        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-      });
-    }
-
-    if (!pricingRule || !pricingRule.isActive) {
-      return next(new AppError("Active pricing rule not found", 404));
-    }
-
-    const ruleBranchId = resolveRuleBranchId(pricingRule);
-    if (!ruleBranchId || ruleBranchId !== branchId) {
-      return next(
-        new AppError(
-          "Pricing rule does not belong to the specified branch",
-          400,
-        ),
-      );
-    }
-
     ensureCanStartVisit(latestVisit?.status);
-
-    const frozenPricing = freezePricingAtSessionStart(pricingRule);
 
     const visit = await prisma.visit.create({
       data: {
@@ -134,16 +123,25 @@ export const startVisit = async (req, res, next) => {
         customerId,
         status: "ACTIVE",
         startedAt: startedAt ? new Date(startedAt) : new Date(),
-        pricingRuleId: frozenPricing.pricingRuleId,
-        pricingMode: frozenPricing.pricingMode,
-        unitPrice: frozenPricing.unitPrice,
-        totalPrice: frozenPricing.totalPrice,
+        totalPrice: 0,
+      },
+      select: {
+        id: true,
+        branchId: true,
+        customerId: true,
+        status: true,
+        startedAt: true,
+        endedAt: true,
+        durationMinutes: true,
+        totalPrice: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     res.status(201).json({
       status: "success",
-      message: "Visit started and pricing snapshot frozen",
+      message: "Visit started successfully",
       data: visit,
     });
   } catch (error) {
@@ -165,7 +163,6 @@ export const closeVisit = async (req, res, next) => {
         status: true,
         startedAt: true,
         pricingMode: true,
-        unitPrice: true,
         totalPrice: true,
       },
     });
@@ -181,23 +178,7 @@ export const closeVisit = async (req, res, next) => {
       return next(new AppError("This Visit already closed", 400));
     }
 
-    if (!visit.pricingMode || visit.unitPrice === null) {
-      return next(
-        new AppError(
-          "Session pricing snapshot is missing; cannot close safely",
-          400,
-        ),
-      );
-    }
-
     const endedAt = new Date();
-    const frozenClose = freezePricingAtSessionClose({
-      startedAt: visit.startedAt,
-      endedAt,
-      pricingMode: visit.pricingMode,
-      unitPrice: visit.unitPrice,
-      existingTotalPrice: visit.totalPrice,
-    });
 
     const [sessionTotals, orderTotals] = await Promise.all([
       prisma.session.aggregate({
@@ -219,15 +200,18 @@ export const closeVisit = async (req, res, next) => {
       }),
     ]);
 
-    const sessionTotal = Number(
-      sessionTotals._sum.totalPrice ?? frozenClose.totalPrice ?? 0,
-    );
+    const sessionTotal = Number(sessionTotals._sum.totalPrice ?? 0);
     const orderTotal = Number(orderTotals._sum.totalPrice ?? 0);
     const finalTotalPrice =
       Math.round((sessionTotal + orderTotal + Number.EPSILON) * 100) / 100;
 
+    const fallbackDurationMinutes = Math.max(
+      0,
+      Math.round((endedAt.getTime() - visit.startedAt.getTime()) / 60000),
+    );
+
     const finalDurationMinutes =
-      sessionTotals._sum.durationMinutes ?? frozenClose.durationMinutes;
+      sessionTotals._sum.durationMinutes ?? fallbackDurationMinutes;
 
     const updated = await prisma.visit.updateMany({
       where: {

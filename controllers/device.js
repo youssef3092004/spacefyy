@@ -5,7 +5,8 @@ import {
   incrementStorageUsage,
   decrementStorageUsage,
 } from "../utils/storageUsage.js";
-import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
+import { redisClient } from "../configs/redis.js";
+import { compressAndUpload } from "../utils/cloudinary.js";
 
 const DeviceType = [
   "PC",
@@ -32,6 +33,13 @@ const DeviceType = [
 
 const PricingType = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
 
+const parseBusyFilter = (value) => {
+  if (value === undefined) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new AppError("isBusy must be true or false", 400);
+};
+
 const fixType = (type) => {
   if (!DeviceType.includes(String(type).toUpperCase())) {
     throw new AppError("Invalid device type", 400);
@@ -51,13 +59,24 @@ export const createDevice = async (req, res, next) => {
     const {
       branchId,
       spaceId,
+      name,
       type,
       customTypeLabel,
       priceType,
+      pricingType,
       price,
+      isBusy,
       isActive,
+      isSGL,
+      SGLPS,
+      DBLPS,
     } = req.body;
-    const requiredFields = { branchId, spaceId, type, price };
+    const trimmedName = typeof name === "string" ? name.trim() : name;
+    const requiredFields = {
+      branchId,
+      name: trimmedName,
+      type,
+    };
     for (const i in requiredFields) {
       if (!requiredFields[i]) {
         return next(
@@ -69,41 +88,85 @@ export const createDevice = async (req, res, next) => {
       }
     }
     const fixedType = fixType(type);
+
     if (customTypeLabel && fixedType !== "OTHER") {
       return next(
         new AppError("customTypeLabel can only be set when type is OTHER", 400),
       );
     }
 
-    const existingSpace = await prisma.space.findUnique({
-      where: { id: spaceId },
-      include: { branch: { select: { businessId: true } } },
-    });
+    const existingSpace = spaceId
+      ? await prisma.space.findUnique({
+          where: { id: spaceId },
+          include: { branch: { select: { businessId: true } } },
+        })
+      : null;
 
-    if (!existingSpace) {
+    if (spaceId && !existingSpace) {
       return next(new AppError("Space not found", 404));
     }
 
-    if (existingSpace.branchId !== branchId) {
+    if (existingSpace && existingSpace.branchId !== branchId) {
       return next(
         new AppError("Space does not belong to the specified branch", 400),
       );
     }
 
-    const businessId = existingSpace.branch.businessId;
+    let businessId = existingSpace?.branch?.businessId;
+
+    if (!businessId) {
+      const branch = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { businessId: true },
+      });
+      if (!branch) {
+        return next(new AppError("Branch not found", 404));
+      }
+      businessId = branch.businessId;
+    }
 
     const { incrementStorage, newDevice } = await prisma.$transaction(
       async (tx) => {
+        const resolvedPriceType = fixPriceType(
+          pricingType || priceType || "PER_HOUR",
+        );
+
+        const deviceData = {
+          branchId,
+          name: trimmedName,
+          type: fixedType,
+          priceType: resolvedPriceType,
+          isBusy: isBusy !== undefined ? Boolean(isBusy) : false,
+          isSGL: isSGL !== undefined ? Boolean(isSGL) : true,
+          isActive: isActive !== undefined ? isActive : true,
+        };
+
+        // If an image was uploaded, include its URL
+        if (req.file && req.file.buffer) {
+          try {
+            const uploaded = await compressAndUpload(
+              req.file.buffer,
+              `devices/${businessId}`,
+            );
+            deviceData.image = uploaded.secure_url || uploaded.url || null;
+          } catch {
+            throw new AppError("Image upload failed", 500);
+          }
+        }
+
+        // Add optional fields only if provided
+        if (spaceId) deviceData.spaceId = spaceId;
+        if (price !== undefined && price !== null) {
+          deviceData.price = price;
+        } else {
+          deviceData.price = 0;
+        }
+        if (SGLPS !== undefined && SGLPS !== null) deviceData.SGLPS = SGLPS;
+        if (DBLPS !== undefined && DBLPS !== null) deviceData.DBLPS = DBLPS;
+        if (customTypeLabel) deviceData.customTypeLabel = customTypeLabel;
+
         const newDevice = await tx.device.create({
-          data: {
-            branchId,
-            spaceId,
-            type: fixedType,
-            customTypeLabel,
-            priceType: fixPriceType(priceType || "PER_HOUR"),
-            price: price || 0,
-            isActive: isActive !== undefined ? isActive : true,
-          },
+          data: deviceData,
         });
 
         const incrementStorage = await incrementStorageUsage(
@@ -116,7 +179,11 @@ export const createDevice = async (req, res, next) => {
       },
     );
 
-    await invalidateCacheByPattern(`devices:*branchId=${branchId}*`);
+    // Invalidate cache
+    const keysToDelete = await redisClient.keys(`devices:branchId=${branchId}*`);
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
 
     res.status(201).json({
       status: "success",
@@ -164,13 +231,15 @@ export const getAllDevices = async (req, res, next) => {
       );
     }
     const { page, limit, skip, order, sort } = pagination(req);
+    const isBusy = parseBusyFilter(req.query.isBusy);
     const [devices, total] = await prisma.$transaction([
       prisma.device.findMany({
         skip: skip,
         take: limit,
         orderBy: { [sort]: order },
+        where: { isBusy },
       }),
-      prisma.device.count(),
+      prisma.device.count({ where: { isBusy } }),
     ]);
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({
@@ -193,24 +262,75 @@ export const getAllByBranchId = async (req, res, next) => {
   try {
     const { branchId } = req.params;
     const { page, limit, skip, order, sort } = pagination(req);
+
     if (!branchId) {
       return next(new AppError("Branch ID is required", 400));
     }
+
     const existingBranch = await prisma.branch.findUnique({
       where: { id: branchId },
     });
     if (!existingBranch) {
       return next(new AppError("Branch not found", 404));
     }
+
+    // Build where clause with all searchable filters
+    const whereClause = { branchId, isDeleted: false };
+
+    // Type filter
+    if (req.query.type) {
+      whereClause.type = String(req.query.type).toUpperCase();
+      if (!DeviceType.includes(whereClause.type)) {
+        return next(new AppError("Invalid device type", 400));
+      }
+    }
+
+    // IsActive filter
+    if (req.query.isActive !== undefined) {
+      whereClause.isActive = req.query.isActive === "true";
+    }
+
+    // IsBusy filter
+    if (req.query.isBusy !== undefined) {
+      whereClause.isBusy = req.query.isBusy === "true";
+    }
+
+    // IsSGL filter
+    if (req.query.isSGL !== undefined) {
+      whereClause.isSGL = req.query.isSGL === "true";
+    }
+
+    // SpaceId filter
+    if (req.query.spaceId) {
+      whereClause.spaceId = req.query.spaceId;
+    }
+
+    // PriceType filter
+    if (req.query.priceType) {
+      whereClause.priceType = String(req.query.priceType).toUpperCase();
+    }
+
+    // Price range filters
+    if (req.query.priceMin || req.query.priceMax) {
+      whereClause.price = {};
+      if (req.query.priceMin) {
+        whereClause.price.gte = parseFloat(req.query.priceMin);
+      }
+      if (req.query.priceMax) {
+        whereClause.price.lte = parseFloat(req.query.priceMax);
+      }
+    }
+
     const [devices, total] = await prisma.$transaction([
       prisma.device.findMany({
-        skip: skip,
+        skip,
         take: limit,
         orderBy: { [sort]: order },
-        where: { branchId: branchId },
+        where: whereClause,
       }),
-      prisma.device.count({ where: { branchId: branchId } }),
+      prisma.device.count({ where: whereClause }),
     ]);
+
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({
       status: "success",
@@ -221,7 +341,6 @@ export const getAllByBranchId = async (req, res, next) => {
         total,
         totalPages,
       },
-      source: "database",
     });
   } catch (error) {
     next(error);
@@ -240,19 +359,45 @@ export const getDevicesByType = async (req, res, next) => {
     if (!DeviceType.includes(type)) {
       return next(new AppError("Invalid device type", 400));
     }
+
     const branch = await prisma.branch.findUnique({
       where: { id: branchId },
     });
-    if (!branch || branch === 0) {
+    if (!branch) {
       return next(new AppError("Branch not found", 404));
     }
 
+    // Build where clause with filters
+    const whereClause = { branchId, type, isDeleted: false };
+
+    if (req.query.isActive !== undefined) {
+      whereClause.isActive = req.query.isActive === "true";
+    }
+
+    if (req.query.isBusy !== undefined) {
+      whereClause.isBusy = req.query.isBusy === "true";
+    }
+
+    if (req.query.isSGL !== undefined) {
+      whereClause.isSGL = req.query.isSGL === "true";
+    }
+
+    if (req.query.spaceId) {
+      whereClause.spaceId = req.query.spaceId;
+    }
+
+    if (req.query.priceType) {
+      whereClause.priceType = String(req.query.priceType).toUpperCase();
+    }
+
     const devices = await prisma.device.findMany({
-      where: { branchId: branchId, type: type },
+      where: whereClause,
     });
-    res
-      .status(200)
-      .json({ status: "success", data: devices, source: "database" });
+
+    res.status(200).json({
+      status: "success",
+      data: devices,
+    });
   } catch (error) {
     next(error);
   }
@@ -262,17 +407,25 @@ export const updateDeviceById = async (req, res, next) => {
   try {
     const { deviceId } = req.params;
     const allowedUpdates = [
+      "name",
       "type",
+      "image",
       "customTypeLabel",
       "priceType",
       "price",
+      "isBusy",
       "isActive",
+      "isSGL",
     ];
     const updates = { ...req.body };
+    if (updates.pricingType && !updates.priceType) {
+      updates.priceType = updates.pricingType;
+      delete updates.pricingType;
+    }
     const isValidOperation = Object.keys(updates).filter((update) =>
       allowedUpdates.includes(update),
     );
-    if (!isValidOperation || isValidOperation.length === 0) {
+    if ((!isValidOperation || isValidOperation.length === 0) && !req.file) {
       return next(new AppError("No valid fields to update", 400));
     }
     if (updates.type) {
@@ -289,6 +442,12 @@ export const updateDeviceById = async (req, res, next) => {
         );
       }
     }
+    if (updates.name !== undefined) {
+      updates.name = String(updates.name).trim();
+      if (!updates.name) {
+        return next(new AppError("Device name cannot be empty", 400));
+      }
+    }
     if (updates.isActive !== undefined) {
       updates.isActive = Boolean(updates.isActive);
     }
@@ -298,16 +457,46 @@ export const updateDeviceById = async (req, res, next) => {
     if (updates.price !== undefined) {
       updates.price = Number(updates.price);
     }
+
+    if (updates.isBusy !== undefined) {
+      updates.isBusy = Boolean(updates.isBusy);
+    }
+
+    if (updates.isSGL !== undefined) {
+      updates.isSGL = Boolean(updates.isSGL);
+    }
     const existingDevice = await prisma.device.findUnique({
       where: { id: deviceId },
     });
     if (!existingDevice || existingDevice === 0) {
       return next(new AppError("Device not found", 404));
     }
+    // Handle image upload if provided
+    if (req.file && req.file.buffer) {
+      try {
+        const uploaded = await compressAndUpload(
+          req.file.buffer,
+          `devices/${existingDevice.branchId}`,
+        );
+        updates.image = uploaded.secure_url || uploaded.url || null;
+      } catch {
+        return next(new AppError("Image upload failed", 500));
+      }
+    }
+
     const updatedDevice = await prisma.device.update({
       where: { id: deviceId },
       data: updates,
     });
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(
+      `devices:branchId=${existingDevice.branchId}*`,
+    );
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
+
     res.status(200).json({ status: "success", data: updatedDevice });
   } catch (error) {
     next(error);
@@ -329,12 +518,25 @@ export const deleteDeviceById = async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.device.delete({
+      await tx.device.update({
         where: { id: deviceId },
+        data: {
+          deletedAt: new Date(),
+          isDeleted: true,
+          deletedBy: req.user.id,
+        },
       });
 
       await decrementStorageUsage(device.branch.businessId, "devices", tx);
     });
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(
+      `devices:branchId=${device.branchId}*`,
+    );
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
 
     res
       .status(200)
@@ -364,12 +566,39 @@ export const deleteDevicesByBranchId = async (req, res, next) => {
     if (!existingBranch || existingBranch === 0) {
       return next(new AppError("Branch not found", 404));
     }
-    const result = await prisma.device.deleteMany({
-      where: { branchId: branchId },
+    const { result } = await prisma.$transaction(async (tx) => {
+      const result = await tx.device.updateMany({
+        where: { branchId: branchId, isDeleted: false },
+        data: {
+          deletedAt: new Date(),
+          isDeleted: true,
+          deletedBy: req.user.id,
+        },
+      });
+
+      if (!result || result.count === 0) {
+        throw new AppError("No devices to delete for this branch", 404);
+      }
+
+      // Decrement storage
+      await decrementStorageUsage(
+        existingBranch.businessId,
+        "devices",
+        tx,
+        result.count,
+      );
+
+      return { result };
     });
-    if (!result || result.count === 0) {
-      return next(new AppError("No devices to delete for this branch", 404));
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(
+      `devices:branchId=${branchId}*`,
+    );
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
     }
+
     res.status(200).json({
       status: "success",
       message: `devices deleted successfully for branch`,
@@ -385,7 +614,10 @@ export const deleteAllDevices = async (req, res, next) => {
     if (req.user.roleName !== "DEVELOPER") {
       return next(new AppError("Only developers can delete all devices", 403));
     }
-    const result = await prisma.device.deleteMany({});
+    const result = await prisma.device.updateMany({
+      where: { isDeleted: false },
+      data: { deletedAt: new Date(), isDeleted: true, deletedBy: req.user.id },
+    });
     if (!result || result.count === 0) {
       return next(new AppError("No devices to delete", 404));
     }

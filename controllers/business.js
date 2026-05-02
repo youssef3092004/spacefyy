@@ -151,7 +151,10 @@ export const getAllBusinesses = async (req, res, next) => {
       prisma.business.count(),
     ]);
     if (!businesses.length) {
-      return next(new AppError("No businesses found", 404));
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
     }
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({

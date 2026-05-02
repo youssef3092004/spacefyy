@@ -2,12 +2,28 @@ import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
-import {
-  decrementStorageUsage,
-  incrementStorageUsage,
-} from "../utils/storageUsage.js";
+import { incrementStorageUsage } from "../utils/storageUsage.js";
+import { redisClient } from "../configs/redis.js";
 
 const SpaceType = ["PRIVATE", "PUBLIC", "DESK", "MEETING", "VIP", "OTHER"];
+const PricingType = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
+
+const parseBusyFilter = (value) => {
+  if (value === undefined) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new AppError("isBusy must be true or false", 400);
+};
+
+const parseBooleanInput = (value, fieldName) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalizedValue = value.trim().toLowerCase();
+    if (normalizedValue === "true") return true;
+    if (normalizedValue === "false") return false;
+  }
+  throw new AppError(`${fieldName} must be true or false`, 400);
+};
 
 const fixType = (type) => {
   if (!SpaceType.includes(String(type).toUpperCase())) {
@@ -18,8 +34,16 @@ const fixType = (type) => {
 
 export const createSpace = async (req, res, next) => {
   try {
-    const { branchId, name, type, capacity, isActive, customTypeLabel } =
-      req.body;
+    const {
+      branchId,
+      name,
+      type,
+      capacity,
+      isActive,
+      customTypeLabel,
+      priceType,
+      price,
+    } = req.body;
     const requiredFields = { branchId, name, type, capacity };
     for (let i in requiredFields) {
       if (!requiredFields[i]) {
@@ -39,6 +63,22 @@ export const createSpace = async (req, res, next) => {
     }
 
     const normalizedType = fixType(type);
+    const normalizedCapacity = Number(capacity);
+    const normalizedIsActive =
+      isActive !== undefined ? parseBooleanInput(isActive, "isActive") : true;
+    if (!Number.isInteger(normalizedCapacity) || normalizedCapacity <= 0) {
+      return next(new AppError("capacity must be a positive integer", 400));
+    }
+
+    const normalizedPriceType = String(priceType || "PER_HOUR").toUpperCase();
+
+    if (!PricingType.includes(normalizedPriceType)) {
+      return next(new AppError("Invalid price type", 400));
+    }
+
+    if (price !== undefined && (isNaN(Number(price)) || Number(price) < 0)) {
+      return next(new AppError("price must be a valid number >= 0", 400));
+    }
 
     if (customTypeLabel && normalizedType !== "OTHER") {
       return next(
@@ -71,8 +111,12 @@ export const createSpace = async (req, res, next) => {
           branchId,
           name,
           type: normalizedType,
-          capacity,
-          isActive: isActive !== undefined ? isActive : true,
+          capacity: normalizedCapacity,
+          availableNumber: normalizedCapacity,
+          priceType: normalizedPriceType,
+          price: Number(price || 0),
+          isBusy: false,
+          isActive: normalizedIsActive,
           customTypeLabel,
           image: imageUrl,
         },
@@ -80,6 +124,12 @@ export const createSpace = async (req, res, next) => {
 
       return { storageUsage, newSpace };
     });
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
 
     res.status(201).json({
       status: "success",
@@ -94,22 +144,153 @@ export const createSpace = async (req, res, next) => {
 
 export const getSpaceById = async (req, res, next) => {
   try {
-    const { branchId, spaceId } = req.params;
-    if (!branchId) {
-      return next(new AppError("Branch ID is required", 400));
-    }
+    const { spaceId } = req.params;
+
     if (!spaceId) {
       return next(new AppError("Space ID is required", 400));
     }
-    const space = await prisma.space.findUnique({
-      where: { id: spaceId },
+    const space = await prisma.space.findFirst({
+      where: { id: spaceId, deletedAt: null, isDeleted: false },
+      select: {
+        id: true,
+        branchId: true,
+        name: true,
+        type: true,
+        customTypeLabel: true,
+        image: true,
+        capacity: true,
+        availableNumber: true,
+        priceType: true,
+        price: true,
+        isActive: true,
+        isBusy: true,
+        createdAt: true,
+        updatedAt: true,
+        devices: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+        units: {
+          where: { isDeleted: false },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+        equipment: {
+          where: { isDeleted: false },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
     });
     if (!space || space === 0) {
       return next(new AppError("Space not found", 404));
     }
-    res
-      .status(200)
-      .json({ status: "success", data: space, source: "database" });
+
+    // Fetch all sessions for analytics
+    const allSessions = await prisma.session.findMany({
+      where: {
+        resourceType: "SPACE",
+        resourceId: spaceId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        visitId: true,
+        startedAt: true,
+        endedAt: true,
+        durationMinutes: true,
+        status: true,
+        priceType: true,
+        basePrice: true,
+        gamesCount: true,
+        unitPrice: true,
+        totalPrice: true,
+        currency: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const now = new Date();
+
+    const analytics = allSessions.reduce(
+      (acc, session) => {
+        const sessionDurationMinutes =
+          session.durationMinutes ??
+          (session.startedAt && session.endedAt
+            ? Math.max(
+                0,
+                Math.round(
+                  (new Date(session.endedAt).getTime() -
+                    new Date(session.startedAt).getTime()) /
+                    60000,
+                ),
+              )
+            : session.status === "ACTIVE"
+              ? Math.max(
+                  0,
+                  Math.round(
+                    (now.getTime() - new Date(session.startedAt).getTime()) /
+                      60000,
+                  ),
+                )
+              : 0);
+
+        acc.totalSessions += 1;
+        acc.activeSessions += session.status === "ACTIVE" ? 1 : 0;
+        acc.endedSessions += session.status === "ENDED" ? 1 : 0;
+        acc.cancelledSessions += session.status === "CANCELLED" ? 1 : 0;
+        acc.totalDurationMinutes += sessionDurationMinutes;
+        acc.totalRevenue += Number(session.totalPrice || 0);
+        acc.totalBaseRevenue += Number(session.basePrice || 0);
+
+        return acc;
+      },
+      {
+        totalSessions: 0,
+        activeSessions: 0,
+        endedSessions: 0,
+        cancelledSessions: 0,
+        totalDurationMinutes: 0,
+        totalRevenue: 0,
+        totalBaseRevenue: 0,
+      },
+    );
+
+    const totalHoursSpent = Number(
+      (analytics.totalDurationMinutes / 60).toFixed(2),
+    );
+    const averageSessionDurationMinutes = analytics.totalSessions
+      ? Math.round(analytics.totalDurationMinutes / analytics.totalSessions)
+      : 0;
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        ...space,
+        analytics: {
+          totalSessions: analytics.totalSessions,
+          activeSessions: analytics.activeSessions,
+          endedSessions: analytics.endedSessions,
+          cancelledSessions: analytics.cancelledSessions,
+          totalDurationMinutes: analytics.totalDurationMinutes,
+          totalHoursSpent,
+          averageSessionDurationMinutes,
+          totalRevenue: Number(analytics.totalRevenue.toFixed(2)),
+          totalBaseRevenue: Number(analytics.totalBaseRevenue.toFixed(2)),
+        },
+      },
+      source: "database",
+    });
   } catch (error) {
     next(error);
   }
@@ -118,22 +299,71 @@ export const getSpaceById = async (req, res, next) => {
 export const getAllByBranchId = async (req, res, next) => {
   try {
     const { branchId } = req.params;
+    if (!branchId) {
+      return next(new AppError("Branch ID is required", 400));
+    }
     const { page, limit, skip, sort, order } = pagination(req);
+
+    // Build where clause with all filters
+    const where = { branchId, deletedAt: null, isDeleted: false };
+
+    if (req.query.type) {
+      where.type = String(req.query.type).toUpperCase();
+      const SpaceType = [
+        "PRIVATE",
+        "PUBLIC",
+        "DESK",
+        "MEETING",
+        "VIP",
+        "OTHER",
+      ];
+      if (!SpaceType.includes(where.type)) {
+        return next(new AppError("Invalid space type", 400));
+      }
+    }
+
+    if (req.query.isActive !== undefined) {
+      where.isActive = req.query.isActive === "true";
+    }
+
+    if (req.query.isBusy !== undefined) {
+      where.isBusy = req.query.isBusy === "true";
+    }
+
+    if (req.query.priceType) {
+      where.priceType = String(req.query.priceType).toUpperCase();
+    }
+
+    // Handle capacity range filters
+    if (req.query.capacity_min || req.query.capacity_max) {
+      where.capacity = {};
+      if (req.query.capacity_min) {
+        where.capacity.gte = parseInt(req.query.capacity_min);
+      }
+      if (req.query.capacity_max) {
+        where.capacity.lte = parseInt(req.query.capacity_max);
+      }
+    }
+
     const [spaces, total] = await prisma.$transaction([
       prisma.space.findMany({
         skip,
         take: limit,
         orderBy: { [sort]: order },
-        where: branchId ? { branchId } : {},
+        where,
       }),
-      prisma.space.count({
-        where: branchId ? { branchId } : {},
-      }),
+      prisma.space.count({ where }),
     ]);
+
     if (!spaces || spaces.length === 0) {
-      return next(new AppError("No spaces found for this branch", 404));
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
     }
+
     const totalPages = Math.ceil(total / limit);
+
     res.status(200).json({
       success: true,
       data: spaces,
@@ -143,7 +373,6 @@ export const getAllByBranchId = async (req, res, next) => {
         limit,
         totalPages,
       },
-      source: "database",
     });
   } catch (error) {
     next(error);
@@ -169,8 +398,15 @@ export const getSpaceByIsActive = async (req, res, next) => {
       return next(new AppError("isActive must be true or false", 400));
     }
     const isActiveBool = isActive === "true";
+    const isBusy = parseBusyFilter(req.query.isBusy);
     const spaces = await prisma.space.findMany({
-      where: { branchId, isActive: isActiveBool },
+      where: {
+        branchId,
+        isActive: isActiveBool,
+        isBusy,
+        deletedAt: null,
+        isDeleted: false,
+      },
     });
     if (!spaces || spaces.length === 0) {
       return next(
@@ -204,8 +440,9 @@ export const getSpacesByType = async (req, res, next) => {
     if (!SpaceType.includes(type)) {
       return next(new AppError("Invalid space type", 400));
     }
+    const isBusy = parseBusyFilter(req.query.isBusy);
     const spaces = await prisma.space.findMany({
-      where: { branchId, type },
+      where: { branchId, type, isBusy, deletedAt: null, isDeleted: false },
     });
     if (!spaces || spaces.length === 0) {
       return next(new AppError("No spaces found with the specified type", 404));
@@ -240,35 +477,22 @@ export const deleteSpaceById = async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Count and delete devices in this space
-      const deviceCount = await tx.device.count({
-        where: { spaceId },
-      });
-
-      await tx.device.deleteMany({
-        where: { spaceId },
-      });
-
-      // Decrement storage for both devices and spaces
-      if (deviceCount > 0) {
-        await decrementStorageUsage(
-          existingSpace.branch.businessId,
-          "devices",
-          tx,
-          deviceCount,
-        );
-      }
-
-      await decrementStorageUsage(
-        existingSpace.branch.businessId,
-        "spaces",
-        tx,
-      );
-
-      await tx.space.delete({
+      // Soft delete the space
+      await tx.space.update({
         where: { id: spaceId },
+        data: {
+          deletedAt: new Date(),
+          isDeleted: true,
+          deletedBy: req.user.id,
+        },
       });
     });
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
 
     res
       .status(200)
@@ -297,42 +521,19 @@ export const deleteSpacesByBranchId = async (req, res, next) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Count and delete all devices in spaces for this branch
-      const deviceCount = await tx.device.count({
-        where: {
-          space: { branchId },
+      // Soft delete all spaces in this branch
+      const result = await tx.space.updateMany({
+        where: { branchId, deletedAt: null, isDeleted: false },
+        data: {
+          deletedAt: new Date(),
+          isDeleted: true,
+          deletedBy: req.user.id,
         },
-      });
-
-      await tx.device.deleteMany({
-        where: {
-          space: { branchId },
-        },
-      });
-
-      const result = await tx.space.deleteMany({
-        where: { branchId },
       });
 
       if (!result.count || result.count === 0) {
         throw new AppError("No space records to delete for this branch", 404);
       }
-
-      if (deviceCount > 0) {
-        await decrementStorageUsage(
-          existingBranch.businessId,
-          "devices",
-          tx,
-          deviceCount,
-        );
-      }
-
-      await decrementStorageUsage(
-        existingBranch.businessId,
-        "spaces",
-        tx,
-        result.count,
-      );
 
       return result;
     });
@@ -352,7 +553,10 @@ export const deleteAllSpaces = async (req, res, next) => {
     if (req.user.roleName !== "DEVELOPER") {
       return next(new AppError("Unauthorized to delete all spaces", 403));
     }
-    const result = await prisma.space.deleteMany({});
+    const result = await prisma.space.updateMany({
+      where: { deletedAt: null, isDeleted: false },
+      data: { deletedAt: new Date(), isDeleted: true, deletedBy: req.user.id },
+    });
     if (!result.count || result.count === 0) {
       return next(new AppError("No space records to delete", 404));
     }
@@ -379,15 +583,25 @@ export const updateSpaceById = async (req, res, next) => {
       "name",
       "type",
       "capacity",
+      "availableNumber",
+      "priceType",
+      "price",
       "isActive",
       "customTypeLabel",
+      "isBusy",
+      "image",
     ];
-    const updates = { ...req.body };
+    let updates = { ...req.body };
 
-    const isValidOperation = Object.keys(updates).filter((update) =>
-      allowedUpdates.includes(update),
-    );
-    if (!isValidOperation || isValidOperation.length === 0) {
+    // Filter to only allowed fields
+    updates = Object.keys(updates)
+      .filter((key) => allowedUpdates.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = updates[key];
+        return obj;
+      }, {});
+
+    if (Object.keys(updates).length === 0 && !req.file) {
       return next(new AppError("No valid fields to update", 400));
     }
 
@@ -403,20 +617,247 @@ export const updateSpaceById = async (req, res, next) => {
       );
     }
 
+    if (updates.priceType !== undefined) {
+      updates.priceType = String(updates.priceType).toUpperCase();
+      if (!PricingType.includes(updates.priceType)) {
+        return next(new AppError("Invalid price type", 400));
+      }
+    }
+
+    if (updates.price !== undefined) {
+      updates.price = Number(updates.price);
+      if (Number.isNaN(updates.price) || updates.price < 0) {
+        return next(new AppError("price must be a valid number >= 0", 400));
+      }
+    }
+
+    if (updates.capacity !== undefined) {
+      updates.capacity = Number(updates.capacity);
+      if (!Number.isInteger(updates.capacity) || updates.capacity <= 0) {
+        return next(new AppError("capacity must be a positive integer", 400));
+      }
+    }
+
+    if (updates.availableNumber !== undefined) {
+      updates.availableNumber = Number(updates.availableNumber);
+      if (
+        !Number.isInteger(updates.availableNumber) ||
+        updates.availableNumber < 0
+      ) {
+        return next(
+          new AppError("availableNumber must be an integer >= 0", 400),
+        );
+      }
+    }
+
     const existingSpace = await prisma.space.findUnique({
       where: { id: spaceId },
     });
     if (updates.isActive !== undefined) {
-      updates.isActive = Boolean(updates.isActive);
+      updates.isActive = parseBooleanInput(updates.isActive, "isActive");
+    }
+    if (updates.isBusy !== undefined) {
+      updates.isBusy = parseBooleanInput(updates.isBusy, "isBusy");
     }
     if (!existingSpace || existingSpace === 0) {
       return next(new AppError("Space not found", 404));
     }
+
+    // Handle image upload if file is provided
+    if (req.file) {
+      try {
+        const uploadResult = await compressAndUpload(req.file.buffer, "spaces");
+        updates.image = uploadResult.secure_url;
+      } catch (error) {
+        return next(error);
+      }
+    }
+
+    if (
+      updates.availableNumber !== undefined &&
+      updates.capacity !== undefined &&
+      updates.availableNumber > updates.capacity
+    ) {
+      return next(new AppError("availableNumber cannot exceed capacity", 400));
+    }
+
+    if (updates.availableNumber !== undefined && updates.isBusy === undefined) {
+      updates.isBusy = updates.availableNumber === 0;
+    }
+
     const updatedSpace = await prisma.space.update({
       where: { id: spaceId },
       data: updates,
     });
+
+    // Invalidate cache for this branch
+    const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+    }
+
     res.status(200).json({ status: "success", data: updatedSpace });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSpaceHistoryFromSession = async (req, res, next) => {
+  try {
+    const { spaceId } = req.params;
+
+    if (!spaceId) {
+      return next(new AppError("Space ID is required", 400));
+    }
+
+    // 🔥 FIXED pagination
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
+    const skip = (page - 1) * limit;
+
+    const { status, priceType } = req.query;
+    const sort = req.query.sort || "createdAt";
+    const order = req.query.order === "asc" ? "asc" : "desc";
+
+    // Check if space exists (optional verification), but don't return error
+    const space = await prisma.space.findUnique({
+      where: { id: spaceId },
+      select: { id: true, isDeleted: true, deletedAt: true },
+    });
+
+    // If space is deleted or doesn't exist, return empty list with success
+    if (!space || space.isDeleted || space.deletedAt) {
+      return res.status(200).json({
+        status: "success",
+        data: [],
+        meta: {
+          total: 0,
+          page: 1,
+          limit: parseInt(req.query.limit) || 10,
+          totalPages: 0,
+        },
+        source: "database",
+      });
+    }
+
+    const validSessionSortFields = [
+      "id",
+      "visitId",
+      "startedAt",
+      "endedAt",
+      "durationMinutes",
+      "status",
+      "priceType",
+      "basePrice",
+      "gamesCount",
+      "unitPrice",
+      "totalPrice",
+      "currency",
+      "createdAt",
+      "updatedAt",
+    ];
+
+    const sortField = validSessionSortFields.includes(sort)
+      ? sort
+      : "createdAt";
+
+    // 🔥 Dynamic filtering with date range
+    const where = {
+      resourceType: "SPACE",
+      resourceId: spaceId,
+      deletedAt: null,
+    };
+
+    if (status) where.status = status;
+    if (priceType) where.priceType = priceType;
+
+    // Add date range filtering on createdAt using pre-parsed dates from middleware
+    if (req.parsedDates?.startDate || req.parsedDates?.endDate) {
+      where.createdAt = {};
+      if (req.parsedDates.startDate) {
+        where.createdAt.gte = req.parsedDates.startDate;
+      }
+      if (req.parsedDates.endDate) {
+        where.createdAt.lte = req.parsedDates.endDate;
+      }
+    }
+
+    const [sessions, totalSessions] = await prisma.$transaction([
+      prisma.session.findMany({
+        where,
+        select: {
+          id: true,
+          visitId: true,
+          startedAt: true,
+          endedAt: true,
+          durationMinutes: true,
+          status: true,
+          priceType: true,
+          basePrice: true,
+          gamesCount: true,
+          unitPrice: true,
+          totalPrice: true,
+          currency: true,
+          createdAt: true,
+          updatedAt: true,
+          visit: {
+            select: {
+              customer: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          [sortField]: order,
+        },
+        skip,
+        take: limit,
+      }),
+
+      prisma.session.count({ where }),
+    ]);
+
+    // Transform response to include customer at top level
+    const transformedSessions = sessions.map((session) => ({
+      id: session.id,
+      visitId: session.visitId,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      durationMinutes: session.durationMinutes,
+      status: session.status,
+      priceType: session.priceType,
+      basePrice: session.basePrice,
+      gamesCount: session.gamesCount,
+      unitPrice: session.unitPrice,
+      totalPrice: session.totalPrice,
+      currency: session.currency,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      customer: {
+        id: session.visit?.customer?.id || null,
+        name: session.visit?.customer?.name || null,
+        phone: session.visit?.customer?.phone || null,
+        email: session.visit?.customer?.email || null,
+      },
+    }));
+
+    res.status(200).json({
+      status: "success",
+      data: transformedSessions,
+      meta: {
+        total: totalSessions,
+        page,
+        limit,
+        totalPages: Math.ceil(totalSessions / limit),
+      },
+      source: "database",
+    });
   } catch (error) {
     next(error);
   }

@@ -1,0 +1,300 @@
+{
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/equipment/create",
+    "description": "Create equipment with optional image upload",
+    "authentication": "Bearer token required",
+    "permission": "CREATE-EQUIPMENT"
+  },
+  "contentType": "multipart/form-data",
+  "notes": {
+    "important": [
+      "Image MUST be sent as file upload in form-data, NOT as base64 in JSON",
+      "All JSON fields are sent as form fields, not in a JSON body",
+      "Supported image formats: JPEG, PNG, GIF, WebP (max 4MB)",
+      "resourceName and resourceId must be provided together or both omitted"
+    ]
+  },
+  "fields": {
+    "required": {
+      "branchId": {
+        "type": "string (UUID)",
+        "description": "Branch ID where equipment belongs",
+        "example": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "name": {
+        "type": "string",
+        "description": "Equipment name (will be trimmed)",
+        "example": "Gaming Controller",
+        "validation": "Cannot be empty after trimming"
+      },
+      "type": {
+        "type": "string",
+        "description": "Equipment type",
+        "enum": [
+          "CONTROLLER",
+          "HEADSET",
+          "KEYBOARD",
+          "MOUSE",
+          "STEERING_WHEEL",
+          "JOYSTICK",
+          "FLIGHT_STICK",
+          "PEDALS",
+          "MICROPHONE",
+          "WEBCAM",
+          "OTHER"
+        ],
+        "example": "CONTROLLER",
+        "validation": "Must be uppercase, case-insensitive input is auto-fixed"
+      }
+    },
+    "optional": {
+      "resourceName": {
+        "type": "string",
+        "description": "Link equipment to a resource",
+        "enum": ["space", "device", "unit"],
+        "example": "space",
+        "validation": "Required if resourceId is provided"
+      },
+      "resourceId": {
+        "type": "string (UUID)",
+        "description": "ID of the resource (space, device, or unit)",
+        "example": "550e8400-e29b-41d4-a716-446655440001",
+        "validation": "Required if resourceName is provided, must exist and belong to branch"
+      },
+      "customTypeLabel": {
+        "type": "string",
+        "description": "Custom label for equipment type",
+        "example": "Custom Racing Setup",
+        "validation": "REQUIRED when type is 'OTHER', forbidden for other types"
+      },
+      "priceType": {
+        "type": "string",
+        "description": "How equipment is priced",
+        "enum": ["PER_HOUR", "PER_SESSION", "PER_GAME"],
+        "default": "PER_SESSION",
+        "example": "PER_HOUR"
+      },
+      "price": {
+        "type": "number",
+        "description": "Price value",
+        "default": 0,
+        "example": 50.0,
+        "validation": "Must be >= 0"
+      },
+      "quantity": {
+        "type": "integer",
+        "description": "Number of equipment units",
+        "default": 1,
+        "example": 5,
+        "validation": "Must be >= 1"
+      },
+      "isBusy": {
+        "type": "boolean",
+        "description": "Whether equipment is currently in use",
+        "default": false,
+        "example": false
+      },
+      "isActive": {
+        "type": "boolean",
+        "description": "Whether equipment is active",
+        "default": true,
+        "example": true
+      },
+      "image": {
+        "type": "file",
+        "description": "Equipment image (form-data file upload)",
+        "formats": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+        "maxSize": "4MB",
+        "fieldName": "image",
+        "example": "equipment-photo.jpg"
+      }
+    }
+  },
+  "examples": {
+    "minimal_without_image": {
+      "description": "Minimum required fields",
+      "formData": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "PS5 Controller",
+        "type": "CONTROLLER"
+      }
+    },
+    "full_with_resource_without_image": {
+      "description": "Complete payload linked to a resource",
+      "formData": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Gaming Controller Set",
+        "type": "CONTROLLER",
+        "resourceName": "device",
+        "resourceId": "550e8400-e29b-41d4-a716-446655440001",
+        "price": "75.50",
+        "priceType": "PER_SESSION",
+        "quantity": "10",
+        "isBusy": "false",
+        "isActive": "true"
+      }
+    },
+    "with_custom_type": {
+      "description": "Equipment with custom type label",
+      "formData": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "VR Racing Rig",
+        "type": "OTHER",
+        "customTypeLabel": "Professional Motion Simulator",
+        "price": "150.00",
+        "priceType": "PER_HOUR",
+        "quantity": "1",
+        "isActive": "true"
+      }
+    },
+    "with_image": {
+      "description": "Equipment with image upload",
+      "formData": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Pro Gaming Headset",
+        "type": "HEADSET",
+        "price": "120.00",
+        "priceType": "PER_SESSION",
+        "quantity": "8",
+        "isActive": "true",
+        "image": "[FILE: headset.jpg]"
+      },
+      "notes": "In Postman, select 'File' type for the image field"
+    }
+  },
+  "postman_collection": {
+    "name": "Equipment API",
+    "item": {
+      "name": "Create Equipment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "branchId",
+              "value": "550e8400-e29b-41d4-a716-446655440000",
+              "type": "text"
+            },
+            {
+              "key": "name",
+              "value": "Gaming Controller",
+              "type": "text"
+            },
+            {
+              "key": "type",
+              "value": "CONTROLLER",
+              "type": "text"
+            },
+            {
+              "key": "resourceName",
+              "value": "space",
+              "type": "text"
+            },
+            {
+              "key": "resourceId",
+              "value": "550e8400-e29b-41d4-a716-446655440001",
+              "type": "text"
+            },
+            {
+              "key": "price",
+              "value": "75.50",
+              "type": "text"
+            },
+            {
+              "key": "priceType",
+              "value": "PER_SESSION",
+              "type": "text"
+            },
+            {
+              "key": "quantity",
+              "value": "10",
+              "type": "text"
+            },
+            {
+              "key": "isBusy",
+              "value": "false",
+              "type": "text"
+            },
+            {
+              "key": "isActive",
+              "value": "true",
+              "type": "text"
+            },
+            {
+              "key": "image",
+              "type": "file",
+              "src": "path/to/image.jpg"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/equipment/create",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "v1", "equipment", "create"]
+        }
+      },
+      "response": {
+        "status": "201 Created",
+        "body": {
+          "status": "success",
+          "message": "Equipment created successfully",
+          "data": {
+            "id": "550e8400-e29b-41d4-a716-446655440002",
+            "branchId": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Gaming Controller",
+            "type": "CONTROLLER",
+            "resourceName": "space",
+            "resourceId": "550e8400-e29b-41d4-a716-446655440001",
+            "price": 75.5,
+            "priceType": "PER_SESSION",
+            "quantity": 10,
+            "image": "https://res.cloudinary.com/...",
+            "isBusy": false,
+            "isActive": true,
+            "customTypeLabel": null,
+            "createdAt": "2026-05-03T10:30:00.000Z",
+            "updatedAt": "2026-05-03T10:30:00.000Z"
+          }
+        }
+      }
+    }
+  },
+  "error_responses": {
+    "400_bad_request": [
+      "branchId is required",
+      "name is required",
+      "type is required",
+      "resourceName must be one of: space, device, unit",
+      "resourceId is required when resourceName is provided",
+      "resourceName is required when resourceId is provided",
+      "customTypeLabel is required when type is OTHER",
+      "customTypeLabel can only be set when type is OTHER",
+      "price must be a valid number >= 0",
+      "quantity must be a positive integer",
+      "Invalid equipment type"
+    ],
+    "404_not_found": [
+      "Branch not found",
+      "Space not found or does not belong to this branch",
+      "Device not found or does not belong to this branch",
+      "Unit not found or does not belong to this branch"
+    ],
+    "500_server_error": ["Image upload failed"]
+  }
+}

@@ -13,6 +13,15 @@ const timeToDate = (time) => {
   return new Date(`2026-01-01T${time}:00.000Z`);
 };
 
+const uploadBranchImage = async (file) => {
+  if (!file) {
+    return null;
+  }
+
+  const uploadResult = await compressAndUpload(file.buffer, "branches");
+  return uploadResult.secure_url;
+};
+
 export const createBranch = async (req, res, next) => {
   try {
     const { name, address, businessId, openingTime, closingTime } = req.body;
@@ -178,7 +187,10 @@ export const getBranchesByBusinessId = async (req, res, next) => {
       }),
     ]);
     if (!branches || branches.length === 0) {
-      return next(new AppError("No branches found for this business", 404));
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
     }
     res.status(200).json({
       success: true,
@@ -209,11 +221,13 @@ export const updateBranchById = async (req, res, next) => {
     if (!name || !address) {
       return next(new AppError("Name and address are required", 400));
     }
+    const image = await uploadBranchImage(req.file);
     const updatedBranch = await prisma.branch.update({
       where: { id: branchId },
       data: {
         name,
         address,
+        ...(image ? { image } : {}),
       },
     });
 
@@ -273,6 +287,12 @@ export const updateBranchByIdPatch = async (req, res, next) => {
       }
       updateData.closingTime = timeToDate(closingTime);
     }
+
+    const image = await uploadBranchImage(req.file);
+    if (image) {
+      updateData.image = image;
+    }
+
     for (const key of Object.keys(updateData)) {
       if (!allowedFields.includes(key)) {
         return next(new AppError(`Field '${key}' cannot be updated`, 400));

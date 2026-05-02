@@ -1,0 +1,14 @@
+[
+  {
+    "id": "66778899-aabb-4cdd-eeff-001122334455",
+    "name": "Standard Pricing",
+    "pricingMode": "PER_HOUR",
+    "price": 10.0
+  },
+  {
+    "id": "778899aa-bbcc-4dee-ff00-112233445566",
+    "name": "Premium Pricing",
+    "pricingMode": "PER_SESSION",
+    "price": 25.0
+  }
+]

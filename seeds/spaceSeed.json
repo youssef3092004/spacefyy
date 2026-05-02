@@ -1,0 +1,26 @@
+[
+  {
+    "id": "01122334-5566-47aa-bbcc-ddeeff223344",
+    "branchId": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
+    "name": "Main Space",
+    "type": "PUBLIC",
+    "capacity": 50,
+    "availableNumber": 1,
+    "priceType": "PER_HOUR",
+    "price": "100",
+    "isActive": true,
+    "createdAt": "2025-02-26T10:00:00Z"
+  },
+  {
+    "id": "12233445-6677-48bb-ccdd-eeff33445566",
+    "branchId": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
+    "name": "Secondary Space",
+    "type": "PRIVATE",
+    "capacity": 20,
+    "availableNumber": 1,
+    "priceType": "PER_HOUR",
+    "price": "150",
+    "isActive": true,
+    "createdAt": "2025-02-26T10:00:00Z"
+  }
+]

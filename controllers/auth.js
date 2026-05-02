@@ -12,16 +12,32 @@ import jwt from "jsonwebtoken";
 import { messages } from "../locales/message.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
 
+const getRoleIdOrThrow = async (roleName) => {
+  const role = await prisma.role.findUnique({
+    where: { name: roleName },
+    select: { id: true },
+  });
+
+  if (!role) {
+    throw new AppError(
+      `Role ${roleName} does not exist. Seed roles first.`,
+      400,
+    );
+  }
+
+  return role.id;
+};
+
 //! handle it in v2
 // import crypto from "crypto";
 
 export const registerOwner = async (req, res, next) => {
   try {
-    if (req.user.roleName !== "DEVELOPER") {
-      return next(
-        new AppError("Forbidden: Only DEVELOPER can register owners", 403),
-      );
-    }
+    // if (req.user.roleName !== "DEVELOPER") {
+    //   return next(
+    //     new AppError("Forbidden: Only DEVELOPER can register owners", 403),
+    //   );
+    // }
     const { name, phone, email, password } = req.body;
 
     const requiredFields = { name, phone, email, password };
@@ -53,14 +69,8 @@ export const registerOwner = async (req, res, next) => {
       ? await compressAndUpload(req.file.buffer, "owners")
       : null;
 
-    const roleId = "7439f11b-70ce-4991-a9d1-2a0ebb87ba31";
+    const roleId = await getRoleIdOrThrow("OWNER");
 
-    const existingRole = await prisma.role.findUnique({
-      where: { id: roleId },
-    });
-    if (!existingRole) {
-      return next(new AppError("Role does not exist", 400));
-    }
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
@@ -145,14 +155,8 @@ export const registerAdmin = async (req, res, next) => {
       ? await compressAndUpload(req.file.buffer, "Admins")
       : null;
 
-    const roleId = "33204c06-3829-48a2-b1e8-fc01586def04";
+    const roleId = await getRoleIdOrThrow("ADMIN");
 
-    const existingRole = await prisma.role.findUnique({
-      where: { id: roleId },
-    });
-    if (!existingRole) {
-      return next(new AppError("Role does not exist", 400));
-    }
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
@@ -266,14 +270,8 @@ export const registerStaff = async (req, res, next) => {
       return next(new AppError("Branch does not exist", 400));
     }
 
-    const roleId = "f2798a57-fc07-40ef-addd-97b14591f245";
+    const roleId = await getRoleIdOrThrow("STAFF");
 
-    const existingRole = await prisma.role.findUnique({
-      where: { id: roleId },
-    });
-    if (!existingRole) {
-      return next(new AppError("Role does not exist", 400));
-    }
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
@@ -370,14 +368,8 @@ export const registerDeveloper = async (req, res, next) => {
       ? await compressAndUpload(req.file.buffer, "Developers")
       : null;
 
-    const roleId = "29d7dca0-3c89-42e3-8659-e66b17032794";
+    const roleId = await getRoleIdOrThrow("DEVELOPER");
 
-    const existingRole = await prisma.role.findUnique({
-      where: { id: roleId },
-    });
-    if (!existingRole) {
-      return next(new AppError("Role does not exist", 400));
-    }
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });

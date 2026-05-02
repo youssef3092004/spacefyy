@@ -11,7 +11,10 @@
     "start": "node server.js",
     "lint": "eslint 'src/**/*.{js,mjs,cjs}'",
     "lint:fix": "eslint . --ext .js --fix",
-    "build": "prisma generate"
+    "build": "prisma generate",
+    "seed": "node --env-file=.env seeds/seed.js",
+    "seed:rbac": "node --env-file=.env seeds/rbac.js",
+    "seed:permissions": "node --env-file=.env seeds/permissions.js"
   },
   "repository": {
     "type": "git",
@@ -31,7 +34,6 @@
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
-    "crypto": "^1.0.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",

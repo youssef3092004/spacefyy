@@ -12,6 +12,7 @@ This document explains how `Visit` and `Session` work in Spacefy, their lifecycl
 - A `Visit` represents the customer-level journey in a branch.
 - A `Session` represents usage of one concrete resource inside a visit (`SPACE`, `DEVICE`, or `TOOL`).
 - Pricing is frozen using snapshots so later pricing-rule edits do not retroactively change existing records.
+- Space availability uses `availableNumber`; `isBusy` becomes `true` when that count reaches `0`.
 
 ## Visit Lifecycle
 
@@ -25,6 +26,9 @@ Main rules:
 - A `PAID` visit cannot be modified.
 - A visit can be invoiced only when it is `CLOSED`.
 - A visit can be marked paid only when it is `INVOICED`.
+- When a space session starts, `availableNumber` decreases by `1`.
+- When that count reaches `0`, the space is marked `isBusy = true`.
+- When the session ends or is cancelled, `availableNumber` increases by `1` and `isBusy` updates back accordingly.
 
 ## Visit Endpoints
 
@@ -41,10 +45,6 @@ Request body:
 {
   "branchId": "branch-uuid",
   "customerId": "customer-uuid",
-  "pricingRuleId": "rule-uuid",
-  "spaceId": "optional-space-uuid",
-  "deviceId": "optional-device-uuid",
-  "toolId": "optional-tool-uuid",
   "startedAt": "2026-03-08T18:00:00.000Z"
 }
 ```
@@ -52,8 +52,7 @@ Request body:
 Notes:
 
 - `branchId` and `customerId` are required.
-- If `pricingRuleId` is missing, exactly one target must be provided from `spaceId`, `deviceId`, `toolId`.
-- On start, pricing snapshot fields are frozen into visit: `pricingRuleId`, `pricingMode`, `unitPrice`, and initial `totalPrice`.
+- Pricing is no longer required at visit start; pricing is resolved through sessions and orders.
 
 ### 2) Close Visit
 
@@ -64,7 +63,7 @@ Notes:
 Behavior:
 
 - Allowed only when visit is `ACTIVE`.
-- Computes `endedAt`, `durationMinutes`, and `totalPrice` from frozen snapshot fields.
+- Computes `endedAt`, `durationMinutes`, and `totalPrice` from sessions and orders.
 - Returns the updated visit with status `CLOSED`.
 
 ### 3) Invoice Visit

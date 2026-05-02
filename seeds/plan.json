@@ -1,0 +1,34 @@
+[
+  {
+    "id": "11223344-5566-4789-aaaa-bbbbccccdddd",
+    "name": "Starter Plan",
+    "type": "FREE",
+    "description": "Starter plan for small businesses",
+    "price": "0",
+    "currency": "EGP",
+    "billingInterval": "MONTHLY",
+    "isActive": true,
+    "isPublic": true,
+    "maxStaff": 5,
+    "maxBranches": 1,
+    "maxSpaces": 10,
+    "maxDevices": 20,
+    "maxUnits": 50
+  },
+  {
+    "id": "22334455-6677-4890-bbbb-ccccddddeeee",
+    "name": "Professional Plan",
+    "type": "PRO",
+    "description": "Professional plan for growing businesses",
+    "price": "299.99",
+    "currency": "EGP",
+    "billingInterval": "MONTHLY",
+    "isActive": true,
+    "isPublic": true,
+    "maxStaff": 25,
+    "maxBranches": 5,
+    "maxSpaces": 50,
+    "maxDevices": 100,
+    "maxUnits": 250
+  }
+]

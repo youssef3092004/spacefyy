@@ -2,8 +2,8 @@ import { AppError } from "./appError.js";
 
 export const PricingType = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
 export const PricingMode = ["TIME_RANGE", "PER_HOUR", "FIXED_PRICE"];
-export const TargetFields = ["spaceId", "deviceId", "toolId"];
-export const TargetModels = ["space", "device", "tool"];
+export const TargetFields = ["spaceId", "deviceId", "unitId", "equipmentId"];
+export const TargetModels = ["space", "device", "unit", "equipment"];
 
 export const normalizePricingMode = (pricingMode) => {
   if (pricingMode === "PER_SESSION") {
@@ -16,7 +16,7 @@ export const ensureSingleTarget = (data = {}) => {
   const targets = TargetFields.filter((field) => Boolean(data[field]));
   if (targets.length !== 1) {
     throw new AppError(
-      "Exactly one target (spaceId, deviceId, toolId) is required",
+      "Exactly one target (spaceId, deviceId, unitId, equipmentId) is required",
       400,
     );
   }
@@ -88,17 +88,20 @@ export const validateTargetOwnership = async (prisma, branchId, data = {}) => {
     if (!device) throw new AppError("Device not found for this branch", 404);
   }
 
-  if (targetField === "toolId") {
-    const tool = await prisma.tool.findFirst({
-      where: {
-        id: data.toolId,
-        branchId,
-        isActive: true,
-        deletedAt: null,
-      },
+  if (targetField === "unitId") {
+    const unit = await prisma.unit.findFirst({
+      where: { id: data.unitId, branchId, isActive: true, isDeleted: false },
       select: { id: true },
     });
-    if (!tool) throw new AppError("Tool not found for this branch", 404);
+    if (!unit) throw new AppError("Unit not found for this branch", 404);
+  }
+
+  if (targetField === "equipmentId") {
+    const equipment = await prisma.equipment.findFirst({
+      where: { id: data.equipmentId, branchId, isActive: true, isDeleted: false },
+      select: { id: true },
+    });
+    if (!equipment) throw new AppError("Equipment not found for this branch", 404);
   }
 
   return targetField;
@@ -108,7 +111,8 @@ export const resolveRuleBranchId = (pricingRule) => {
   return (
     pricingRule?.space?.branchId ||
     pricingRule?.device?.branchId ||
-    pricingRule?.tool?.branchId ||
+    pricingRule?.unit?.branchId ||
+    pricingRule?.equipment?.branchId ||
     null
   );
 };

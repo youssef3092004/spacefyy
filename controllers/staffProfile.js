@@ -161,10 +161,6 @@ export const getAllStaffProfiles = async (req, res, next) => {
       prisma.staffProfile.count(),
     ]);
 
-    if (!staffProfiles.length) {
-      return next(new AppError("No staff profiles found", 404));
-    }
-
     const totalPages = Math.ceil(total / limit);
 
     res.status(200).json({
@@ -221,9 +217,6 @@ export const getStaffProfilesByBranchId = async (req, res, next) => {
       prisma.staffProfile.count({ where: { branchId } }),
     ]);
 
-    if (!staffProfiles || staffProfiles.length === 0) {
-      return next(new AppError("No staff profiles found for this branch", 404));
-    }
     const totalPages = Math.ceil(total / limit);
 
     res.status(200).json({

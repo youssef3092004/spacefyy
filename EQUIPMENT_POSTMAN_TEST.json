@@ -1,0 +1,206 @@
+{
+  "postman_test_payload": {
+    "description": "Ready-to-use Postman test payload for equipment creation with resourceName and resourceId",
+    "instructions": {
+      "1_select_method": "POST",
+      "2_enter_url": "http://localhost:3000/api/v1/equipment/create",
+      "3_go_to_headers": "Add: Authorization: Bearer YOUR_TOKEN_HERE",
+      "4_go_to_body": "Select 'form-data' mode (NOT raw JSON)",
+      "5_add_these_fields": "See 'form_data_fields' below"
+    },
+    "form_data_fields": [
+      {
+        "key": "branchId",
+        "value": "550e8400-e29b-41d4-a716-446655440000",
+        "type": "text",
+        "description": "Your branch UUID"
+      },
+      {
+        "key": "name",
+        "value": "PS5 Controller Bundle",
+        "type": "text",
+        "description": "Equipment name"
+      },
+      {
+        "key": "type",
+        "value": "CONTROLLER",
+        "type": "text",
+        "description": "Equipment type (CONTROLLER, HEADSET, KEYBOARD, MOUSE, STEERING_WHEEL, JOYSTICK, FLIGHT_STICK, PEDALS, MICROPHONE, WEBCAM, OTHER)"
+      },
+      {
+        "key": "resourceName",
+        "value": "space",
+        "type": "text",
+        "description": "Link to this resource type: space, device, or unit (MUST have resourceId if provided)"
+      },
+      {
+        "key": "resourceId",
+        "value": "01122334-5566-47aa-bbcc-ddeeff223344",
+        "type": "text",
+        "description": "UUID of the resource (space/device/unit) - MUST match resourceName and belong to branch"
+      },
+      {
+        "key": "price",
+        "value": "75.50",
+        "type": "text",
+        "description": "Price (default: 0)"
+      },
+      {
+        "key": "priceType",
+        "value": "PER_SESSION",
+        "type": "text",
+        "description": "Pricing model: PER_HOUR, PER_SESSION, or PER_GAME (default: PER_SESSION)"
+      },
+      {
+        "key": "quantity",
+        "value": "5",
+        "type": "text",
+        "description": "Number of units (default: 1, must be >= 1)"
+      },
+      {
+        "key": "isBusy",
+        "value": "false",
+        "type": "text",
+        "description": "Is in use now? (default: false)"
+      },
+      {
+        "key": "isActive",
+        "value": "true",
+        "type": "text",
+        "description": "Is active? (default: true)"
+      },
+      {
+        "key": "image",
+        "value": "select_your_image_file_here",
+        "type": "file",
+        "description": "Optional: Select image file in Postman (JPEG, PNG, GIF, WebP, max 4MB)"
+      }
+    ],
+    "example_with_space_resource": {
+      "description": "Equipment linked to a SPACE",
+      "payload": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Gaming Setup",
+        "type": "KEYBOARD",
+        "resourceName": "space",
+        "resourceId": "01122334-5566-47aa-bbcc-ddeeff223344",
+        "price": "100.00",
+        "priceType": "PER_HOUR",
+        "quantity": "3",
+        "isActive": "true"
+      }
+    },
+    "example_with_device_resource": {
+      "description": "Equipment linked to a DEVICE",
+      "payload": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "PS5 Controller",
+        "type": "CONTROLLER",
+        "resourceName": "device",
+        "resourceId": "22334455-6677-48bb-ccdd-eeff223344aa",
+        "price": "50.00",
+        "priceType": "PER_SESSION",
+        "quantity": "4",
+        "isActive": "true"
+      }
+    },
+    "example_with_unit_resource": {
+      "description": "Equipment linked to a UNIT",
+      "payload": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Arcade Cabinet Controller",
+        "type": "JOYSTICK",
+        "resourceName": "unit",
+        "resourceId": "33445566-7788-49cc-ddee-ff223344aabb",
+        "price": "25.00",
+        "priceType": "PER_GAME",
+        "quantity": "1",
+        "isActive": "true"
+      }
+    },
+    "example_without_resource": {
+      "description": "Equipment NOT linked to any resource (resourceName and resourceId omitted)",
+      "payload": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Standalone Headset",
+        "type": "HEADSET",
+        "price": "120.00",
+        "priceType": "PER_HOUR",
+        "quantity": "2",
+        "isActive": "true"
+      }
+    },
+    "example_with_custom_type": {
+      "description": "Equipment with custom type (type must be OTHER and customTypeLabel required)",
+      "payload": {
+        "branchId": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Racing Sim",
+        "type": "OTHER",
+        "customTypeLabel": "Professional Motion Simulator Rig",
+        "resourceName": "space",
+        "resourceId": "44556677-8899-4add-eeff-223344aabbcc",
+        "price": "250.00",
+        "priceType": "PER_HOUR",
+        "quantity": "1",
+        "isActive": "true"
+      }
+    },
+    "validation_rules": {
+      "resourceName_and_resourceId": {
+        "rule": "MUST be provided together or BOTH omitted",
+        "valid": [
+          "Both provided (links equipment to resource)",
+          "Both omitted (standalone equipment)"
+        ],
+        "invalid": [
+          "Only resourceName provided ❌",
+          "Only resourceId provided ❌"
+        ],
+        "allowed_values_for_resourceName": ["space", "device", "unit"]
+      },
+      "type_and_customTypeLabel": {
+        "rule": "customTypeLabel only allowed when type is OTHER",
+        "valid": [
+          "type: 'OTHER' + customTypeLabel: 'label' ✓",
+          "type: 'CONTROLLER' (no customTypeLabel) ✓"
+        ],
+        "invalid": [
+          "type: 'CONTROLLER' + customTypeLabel: 'label' ❌",
+          "type: 'OTHER' (without customTypeLabel) ❌"
+        ]
+      },
+      "price": {
+        "rule": "Must be number >= 0",
+        "valid": ["0", "50.50", "99.99"],
+        "invalid": ["-10", "abc"]
+      },
+      "quantity": {
+        "rule": "Must be positive integer >= 1",
+        "valid": ["1", "5", "100"],
+        "invalid": ["0", "-1", "2.5"]
+      }
+    },
+    "common_errors": {
+      "error_1": {
+        "message": "resourceName must be one of: space, device, unit",
+        "cause": "Invalid resourceName value",
+        "fix": "Use only 'space', 'device', or 'unit'"
+      },
+      "error_2": {
+        "message": "resourceId is required when resourceName is provided",
+        "cause": "Provided resourceName but not resourceId",
+        "fix": "Either provide both resourceName AND resourceId, or provide neither"
+      },
+      "error_3": {
+        "message": "Space not found or does not belong to this branch",
+        "cause": "resourceId doesn't exist or belongs to different branch",
+        "fix": "Verify the space/device/unit ID exists and belongs to your branch"
+      },
+      "error_4": {
+        "message": "customTypeLabel is required when type is OTHER",
+        "cause": "Set type to OTHER but no customTypeLabel",
+        "fix": "Add customTypeLabel field with a description"
+      }
+    }
+  }
+}

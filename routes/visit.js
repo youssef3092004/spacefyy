@@ -4,6 +4,7 @@ import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import {
   closeVisit,
+  getAllByBranchId,
   invoiceVisit,
   payVisit,
   startVisit,
@@ -17,6 +18,13 @@ router.post(
   checkPermission("CREATE-VISITS"),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   startVisit,
+);
+router.get(
+  "/getAllByBranchId/:branchId",
+  verifyToken,
+  checkPermission("VIEW-VISITS", true),
+  checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  getAllByBranchId,
 );
 router.patch(
   "/close/:visitId",

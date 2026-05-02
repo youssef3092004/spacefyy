@@ -29,7 +29,8 @@ export const incrementStorageUsage = async (
       branches: "currentBranches",
       spaces: "currentSpaces",
       devices: "currentDevices",
-      tools: "currentTools",
+      units: "currentUnits",
+      equipment: "currentEquipment",
       staff: "currentStaff",
       users: "currentUsers",
     };
@@ -38,7 +39,8 @@ export const incrementStorageUsage = async (
       branches: "maxBranches",
       spaces: "maxSpaces",
       devices: "maxDevices",
-      tools: "maxTools",
+      units: "maxUnits",
+      equipment: "maxEquipment",
       staff: "maxStaff",
       users: "maxUsers",
     };
@@ -80,6 +82,7 @@ export const incrementStorageUsage = async (
       throw new AppError(
         `Cannot create ${resourceType}. Maximum limit of ${maxLimit} reached (current: ${currentCount})`,
         403,
+        { typeError: "limit" },
       );
     }
 
@@ -114,7 +117,8 @@ export const decrementStorageUsage = async (
       branches: "currentBranches",
       spaces: "currentSpaces",
       devices: "currentDevices",
-      tools: "currentTools",
+      units: "currentUnits",
+      equipment: "currentEquipment",
       staff: "currentStaff",
       users: "currentUsers",
     };
@@ -164,7 +168,8 @@ export const resetStorageUsageByRecourse = async (
       branches: "currentBranches",
       spaces: "currentSpaces",
       devices: "currentDevices",
-      tools: "currentTools",
+      units: "currentUnits",
+      equipment: "currentEquipment",
       staff: "currentStaff",
       users: "currentUsers",
     };
@@ -204,7 +209,8 @@ export const initializeStorageUsage = async (businessId) => {
         currentBranches: 0,
         currentSpaces: 0,
         currentDevices: 0,
-        currentTools: 0,
+        currentUnits: 0,
+        currentEquipment: 0,
         currentStaff: 0,
         currentUsers: 0,
       },
@@ -239,7 +245,8 @@ export const updateStorageUsage = async (businessId) => {
       branchCount,
       spaceCount,
       deviceCount,
-      toolCount,
+      unitCount,
+      equipmentCount,
       staffCount,
       userCount,
     ] = await Promise.all([
@@ -250,8 +257,11 @@ export const updateStorageUsage = async (businessId) => {
       prisma.device.count({
         where: { branch: { businessId } },
       }),
-      prisma.tool.count({
-        where: { branch: { businessId } },
+      prisma.unit.count({
+        where: { branch: { businessId }, isDeleted: false },
+      }),
+      prisma.equipment.count({
+        where: { branch: { businessId }, isDeleted: false },
       }),
       prisma.staffProfile.count({
         where: { branch: { businessId } },
@@ -272,7 +282,8 @@ export const updateStorageUsage = async (businessId) => {
           currentBranches: 0,
           currentSpaces: 0,
           currentDevices: 0,
-          currentTools: 0,
+          currentUnits: 0,
+          currentEquipment: 0,
           currentStaff: 0,
           currentUsers: 0,
         },
@@ -285,7 +296,8 @@ export const updateStorageUsage = async (businessId) => {
         currentBranches: branchCount,
         currentSpaces: spaceCount,
         currentDevices: deviceCount,
-        currentTools: toolCount,
+        currentUnits: unitCount,
+        currentEquipment: equipmentCount,
         currentStaff: staffCount,
         currentUsers: userCount,
       },
@@ -319,7 +331,8 @@ export const recordStorageSnapshot = async (businessId) => {
         branches: storageUsage.currentBranches,
         spaces: storageUsage.currentSpaces,
         devices: storageUsage.currentDevices,
-        tools: storageUsage.currentTools,
+        units: storageUsage.currentUnits,
+        equipment: storageUsage.currentEquipment,
         staff: storageUsage.currentStaff,
         users: storageUsage.currentUsers,
       },
@@ -364,9 +377,13 @@ export const checkResourceLimit = async (businessId, resourceType) => {
         current: storageUsage.currentDevices,
         max: plan.maxDevices,
       },
-      tools: {
-        current: storageUsage.currentTools,
-        max: plan.maxTools,
+      units: {
+        current: storageUsage.currentUnits,
+        max: plan.maxUnits,
+      },
+      equipment: {
+        current: storageUsage.currentEquipment,
+        max: plan.maxEquipment,
       },
       staff: {
         current: storageUsage.currentStaff,
@@ -452,12 +469,20 @@ export const getStorageUsageSummary = async (businessId) => {
             plan.maxDevices,
           ),
         },
-        tools: {
-          current: storageUsage.currentTools,
-          max: plan.maxTools,
+        units: {
+          current: storageUsage.currentUnits,
+          max: plan.maxUnits,
           usagePercent: calculatePercentage(
-            storageUsage.currentTools,
-            plan.maxTools,
+            storageUsage.currentUnits,
+            plan.maxUnits,
+          ),
+        },
+        equipment: {
+          current: storageUsage.currentEquipment,
+          max: plan.maxEquipment,
+          usagePercent: calculatePercentage(
+            storageUsage.currentEquipment,
+            plan.maxEquipment,
           ),
         },
         staff: {

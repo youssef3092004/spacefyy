@@ -5,8 +5,14 @@ export function errorHandler(err, req, res, next) {
 
   console.error(`Error: ${message}, Status Code: ${statusCode}`);
 
-  res.status(statusCode).json({
+  const response = {
     success: err.success ?? false,
     error: message,
-  });
+  };
+
+  if (err.typeError) {
+    response.typeError = err.typeError;
+  }
+
+  res.status(statusCode).json(response);
 }

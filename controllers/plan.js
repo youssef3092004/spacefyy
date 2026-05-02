@@ -28,7 +28,8 @@ export const createPlan = async (req, res, next) => {
       maxBranches,
       maxSpaces,
       maxDevices,
-      maxTools,
+      maxUnits,
+      maxEquipment,
       maxUsers,
     } = req.body;
 
@@ -40,7 +41,8 @@ export const createPlan = async (req, res, next) => {
       maxBranches,
       maxSpaces,
       maxDevices,
-      maxTools,
+      maxUnits,
+      maxEquipment,
       maxUsers,
     };
     for (const field in requiredFields) {
@@ -92,7 +94,8 @@ export const createPlan = async (req, res, next) => {
         maxBranches,
         maxSpaces,
         maxDevices,
-        maxTools,
+        maxUnits,
+        maxEquipment,
         maxUsers,
       },
     });
@@ -195,7 +198,8 @@ export const updatePlanById = async (req, res, next) => {
       "maxBranches",
       "maxSpaces",
       "maxDevices",
-      "maxTools",
+      "maxUnits",
+      "maxEquipment",
       "maxUsers",
     ];
 

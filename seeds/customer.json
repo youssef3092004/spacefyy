@@ -1,0 +1,29 @@
+[
+  {
+    "id": "c1d2e3f4-a5b6-4a7b-8c9d-0e1f2a3b4c50",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "201-123-4567",
+    "businessId": "33445566-7788-4901-cccc-ddddeeeeffffee",
+    "seqNumber": 1,
+    "createdAt": "2025-02-26T10:00:00Z"
+  },
+  {
+    "id": "d2e3f4a5-b6c7-4b8c-9d0e-1f2a3b4c5d60",
+    "name": "Jane Smith",
+    "email": "jane@example.com",
+    "phone": "201-987-6543",
+    "businessId": "33445566-7788-4901-cccc-ddddeeeeffffee",
+    "seqNumber": 2,
+    "createdAt": "2025-02-26T10:00:00Z"
+  },
+  {
+    "id": "e3f4a5b6-c7d8-4c9d-0e1f-2a3b4c5d6e70",
+    "name": "Bob Johnson",
+    "email": "bob@example.com",
+    "phone": "201-555-1234",
+    "businessId": "44556677-8899-4012-dddd-eeeeffff0011",
+    "seqNumber": 1,
+    "createdAt": "2025-02-26T10:00:00Z"
+  }
+]

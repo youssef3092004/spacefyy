@@ -1,10 +1,11 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import {
+  calculatePriceByType,
   calculateDurationMinutes,
-  calculateSessionTotal,
   ensureSessionStatusTransition,
   getSessionQueryOptions,
+  normalizeSessionPriceType,
   normalizeSessionResourceType,
   normalizeSessionStatus,
   parseDate,
@@ -19,6 +20,9 @@ const sessionSelect = {
   resourceType: true,
   resourceId: true,
   pricingRuleId: true,
+  priceType: true,
+  basePrice: true,
+  gamesCount: true,
   unitPrice: true,
   totalPrice: true,
   currency: true,
@@ -77,15 +81,250 @@ const ensureResourceExists = async ({ resourceType, resourceId, branchId }) => {
     return;
   }
 
-  if (resourceType === "TOOL") {
-    const tool = await prisma.tool.findFirst({
-      where: { id: resourceId, branchId, isActive: true, deletedAt: null },
+  if (resourceType === "UNIT") {
+    const unit = await prisma.unit.findFirst({
+      where: { id: resourceId, branchId, isActive: true, isDeleted: false },
       select: { id: true },
     });
-    if (!tool) {
-      throw new AppError("Tool not found for this branch", 404);
+    if (!unit) {
+      throw new AppError("Unit not found for this branch", 404);
+    }
+    return;
+  }
+
+  if (resourceType === "EQUIPMENT") {
+    const equipment = await prisma.equipment.findFirst({
+      where: { id: resourceId, branchId, isActive: true, isDeleted: false },
+      select: { id: true },
+    });
+    if (!equipment) {
+      throw new AppError("Equipment not found for this branch", 404);
     }
   }
+};
+
+const reserveResourceAvailability = async (
+  tx,
+  { resourceType, resourceId, branchId },
+) => {
+  if (resourceType === "SPACE") {
+    const updated = await tx.space.updateMany({
+      where: {
+        id: resourceId,
+        branchId,
+        isActive: true,
+        availableNumber: { gt: 0 },
+      },
+      data: { availableNumber: { decrement: 1 } },
+    });
+
+    if (updated.count === 0) {
+      throw new AppError("Space is not available", 400);
+    }
+
+    const space = await tx.space.findFirst({
+      where: { id: resourceId, branchId },
+      select: { availableNumber: true },
+    });
+
+    await tx.space.update({
+      where: { id: resourceId },
+      data: { isBusy: Number(space?.availableNumber || 0) <= 0 },
+    });
+
+    return;
+  }
+
+  if (resourceType === "DEVICE") {
+    const updated = await tx.device.updateMany({
+      where: {
+        id: resourceId,
+        branchId,
+        isActive: true,
+        isBusy: false,
+      },
+      data: { isBusy: true },
+    });
+
+    if (updated.count === 0) {
+      throw new AppError("Device is not available", 400);
+    }
+
+    return;
+  }
+
+  if (resourceType === "UNIT") {
+    const updated = await tx.unit.updateMany({
+      where: { id: resourceId, branchId, isActive: true, isDeleted: false, isBusy: false },
+      data: { isBusy: true },
+    });
+    if (updated.count === 0) throw new AppError("Unit is not available", 400);
+    return;
+  }
+
+  if (resourceType === "EQUIPMENT") {
+    const updated = await tx.equipment.updateMany({
+      where: { id: resourceId, branchId, isActive: true, isDeleted: false, isBusy: false },
+      data: { isBusy: true },
+    });
+    if (updated.count === 0) throw new AppError("Equipment is not available", 400);
+  }
+};
+
+const releaseResourceAvailability = async (
+  tx,
+  { resourceType, resourceId, branchId },
+) => {
+  if (resourceType === "SPACE") {
+    const space = await tx.space.findFirst({
+      where: { id: resourceId, branchId },
+      select: { id: true, availableNumber: true, capacity: true },
+    });
+
+    if (!space) {
+      return;
+    }
+
+    const nextAvailableNumber = Math.min(
+      space.capacity,
+      space.availableNumber + 1,
+    );
+
+    await tx.space.update({
+      where: { id: resourceId },
+      data: {
+        availableNumber: nextAvailableNumber,
+        isBusy: nextAvailableNumber <= 0,
+      },
+    });
+
+    return;
+  }
+
+  if (resourceType === "DEVICE") {
+    await tx.device.updateMany({
+      where: { id: resourceId, branchId },
+      data: { isBusy: false },
+    });
+
+    return;
+  }
+
+  if (resourceType === "UNIT") {
+    await tx.unit.updateMany({
+      where: { id: resourceId, branchId, isDeleted: false },
+      data: { isBusy: false },
+    });
+    return;
+  }
+
+  if (resourceType === "EQUIPMENT") {
+    await tx.equipment.updateMany({
+      where: { id: resourceId, branchId, isDeleted: false },
+      data: { isBusy: false },
+    });
+  }
+};
+
+const mapPricingRuleToPriceType = (pricingRule) => {
+  if (!pricingRule) {
+    return "PER_HOUR";
+  }
+
+  if (pricingRule.pricingMode === "FIXED_PRICE") {
+    return "PER_SESSION";
+  }
+
+  return normalizeSessionPriceType(pricingRule.pricingType, "PER_HOUR");
+};
+
+const calculateSessionPricing = ({
+  priceType,
+  amount,
+  startedAt,
+  endedAt,
+  gamesCount = 1,
+  amountFieldName = "basePrice",
+}) => {
+  const normalizedPriceType = normalizeSessionPriceType(priceType, "PER_HOUR");
+  const parsedAmount = parseMoney(amount, amountFieldName);
+  const parsedGamesCount = Number(gamesCount ?? 1);
+
+  return {
+    priceType: normalizedPriceType,
+    unitPrice: parsedAmount,
+    basePrice: parsedAmount,
+    totalPrice: calculatePriceByType({
+      priceType: normalizedPriceType,
+      amount: parsedAmount,
+      startedAt,
+      endedAt,
+      gamesCount: parsedGamesCount,
+    }),
+  };
+};
+
+const resolveResourcePricing = async ({
+  resourceType,
+  resourceId,
+  branchId,
+}) => {
+  if (resourceType === "SPACE") {
+    const space = await prisma.space.findFirst({
+      where: { id: resourceId, branchId, isActive: true },
+      select: { id: true, type: true, priceType: true, price: true },
+    });
+
+    if (!space) {
+      throw new AppError("Space not found for this branch", 404);
+    }
+
+    // BUG-FIX-1: Exclude PUBLIC spaces from rental charges
+    const spacePrice = space.type === "PUBLIC" ? 0 : space.price;
+
+    return {
+      priceType: normalizeSessionPriceType(space.priceType, "PER_HOUR"),
+      price: parseMoney(spacePrice || 0, "space.price"),
+    };
+  }
+
+  if (resourceType === "DEVICE") {
+    const device = await prisma.device.findFirst({
+      where: { id: resourceId, branchId, isActive: true },
+      select: { id: true, priceType: true, price: true },
+    });
+
+    if (!device) {
+      throw new AppError("Device not found for this branch", 404);
+    }
+
+    return {
+      priceType: normalizeSessionPriceType(device.priceType, "PER_HOUR"),
+      price: parseMoney(device.price || 0, "device.price"),
+    };
+  }
+
+  if (resourceType === "UNIT") {
+    const unit = await prisma.unit.findFirst({
+      where: { id: resourceId, branchId, isActive: true, isDeleted: false },
+      select: { id: true, priceType: true, price: true },
+    });
+    if (!unit) throw new AppError("Unit not found for this branch", 404);
+    return {
+      priceType: normalizeSessionPriceType(unit.priceType, "PER_HOUR"),
+      price: parseMoney(unit.price || 0, "unit.price"),
+    };
+  }
+
+  const equipment = await prisma.equipment.findFirst({
+    where: { id: resourceId, branchId, isActive: true, isDeleted: false },
+    select: { id: true, priceType: true, price: true },
+  });
+  if (!equipment) throw new AppError("Equipment not found for this branch", 404);
+  return {
+    priceType: normalizeSessionPriceType(equipment.priceType, "PER_SESSION"),
+    price: parseMoney(equipment.price || 0, "equipment.price"),
+  };
 };
 
 const resolveActorUserId = async (req) => {
@@ -114,6 +353,7 @@ export const createSession = async (req, res, next) => {
       bookingId,
       resourceType,
       resourceId,
+      gamesCount,
       totalPrice,
       startedAt,
       endedAt,
@@ -174,7 +414,9 @@ export const createSession = async (req, res, next) => {
         ? { spaceId: resourceId }
         : normalizedResourceType === "DEVICE"
           ? { deviceId: resourceId }
-          : { toolId: resourceId };
+          : normalizedResourceType === "UNIT"
+            ? { unitId: resourceId }
+            : { equipmentId: resourceId };
 
     const pricingRule = await prisma.pricingRule.findFirst({
       where: {
@@ -188,29 +430,11 @@ export const createSession = async (req, res, next) => {
         pricingMode: true,
         price: true,
         currency: true,
+        pricingType: true,
       },
     });
 
-    if (!pricingRule) {
-      return next(
-        new AppError("Pricing rule not found for this resource", 404),
-      );
-    }
-
     const actorUserId = await resolveActorUserId(req);
-
-    const resolvedUnitPrice = parseMoney(
-      pricingRule.price,
-      "pricingRule.price",
-    );
-    const resolvedTotalPrice = calculateSessionTotal({
-      pricingMode: pricingRule.pricingMode,
-      unitPrice: resolvedUnitPrice,
-      startedAt: sessionStartedAt,
-      endedAt:
-        normalizedStatus === "ACTIVE" ? null : sessionEndedAt || new Date(),
-      fallbackTotalPrice: totalPrice,
-    });
 
     const resolvedEndedAt =
       normalizedStatus === "ACTIVE" ? null : sessionEndedAt || new Date();
@@ -218,25 +442,75 @@ export const createSession = async (req, res, next) => {
     const resolvedDuration = resolvedEndedAt
       ? calculateDurationMinutes(sessionStartedAt, resolvedEndedAt)
       : null;
+    const parsedGamesCount =
+      gamesCount === undefined ? 1 : Number(gamesCount);
 
-    const session = await prisma.session.create({
-      data: {
-        visitId,
-        bookingId: bookingId || null,
-        branchId,
-        resourceType: normalizedResourceType,
-        resourceId,
-        pricingRuleId: pricingRule.id,
-        unitPrice: resolvedUnitPrice,
-        totalPrice: resolvedTotalPrice,
-        currency: pricingRule.currency || "EGP",
-        startedAt: sessionStartedAt,
-        endedAt: resolvedEndedAt,
-        durationMinutes: resolvedDuration,
-        status: normalizedStatus,
-        createdById: actorUserId,
-      },
-      select: sessionSelect,
+    if (!Number.isInteger(parsedGamesCount) || parsedGamesCount <= 0) {
+      return next(new AppError("gamesCount must be a positive integer", 400));
+    }
+
+    const baseResourcePricing = await resolveResourcePricing({
+      resourceType: normalizedResourceType,
+      resourceId,
+      branchId: visit.branchId,
+    });
+
+    const computed = calculateSessionPricing(
+      pricingRule
+        ? {
+            priceType: mapPricingRuleToPriceType(pricingRule),
+            amount: pricingRule.price,
+            amountFieldName: "pricingRule.price",
+            startedAt: sessionStartedAt,
+            endedAt: resolvedEndedAt,
+            gamesCount: parsedGamesCount,
+          }
+        : {
+            priceType: baseResourcePricing.priceType,
+            amount: baseResourcePricing.price,
+            startedAt: sessionStartedAt,
+            endedAt: resolvedEndedAt,
+            gamesCount: parsedGamesCount,
+          },
+    );
+
+    if (totalPrice !== undefined) {
+      computed.totalPrice = parseMoney(totalPrice, "totalPrice");
+    }
+
+    const session = await prisma.$transaction(async (tx) => {
+      if (normalizedStatus === "ACTIVE") {
+        await reserveResourceAvailability(tx, {
+          resourceType: normalizedResourceType,
+          resourceId,
+          branchId,
+        });
+      }
+
+      return tx.session.create({
+        data: {
+          visitId,
+          bookingId: bookingId || null,
+          branchId,
+          resourceType: normalizedResourceType,
+          resourceId,
+          pricingRuleId: pricingRule?.id || null,
+          priceType: pricingRule
+            ? mapPricingRuleToPriceType(pricingRule)
+            : baseResourcePricing.priceType,
+          basePrice: computed.basePrice,
+          gamesCount: parsedGamesCount,
+          unitPrice: computed.unitPrice,
+          totalPrice: computed.totalPrice,
+          currency: pricingRule?.currency || "EGP",
+          startedAt: sessionStartedAt,
+          endedAt: resolvedEndedAt,
+          durationMinutes: resolvedDuration,
+          status: normalizedStatus,
+          createdById: actorUserId,
+        },
+        select: sessionSelect,
+      });
     });
 
     res.status(201).json({
@@ -318,13 +592,15 @@ export const updateSessionById = async (req, res, next) => {
     const existingSession = await getSessionByIdOrThrow(sessionId);
     ensureBranchMatch(existingSession.branchId, branchId);
 
-    const linkedPricingRule = await prisma.pricingRule.findUnique({
-      where: { id: existingSession.pricingRuleId },
-      select: { pricingMode: true },
-    });
-
-    const { bookingId, totalPrice, currency, startedAt, endedAt, status } =
-      req.body;
+    const {
+      bookingId,
+      gamesCount,
+      totalPrice,
+      currency,
+      startedAt,
+      endedAt,
+      status,
+    } = req.body;
 
     const updateData = {};
 
@@ -338,6 +614,14 @@ export const updateSessionById = async (req, res, next) => {
 
     if (startedAt !== undefined) {
       updateData.startedAt = parseDate(startedAt, "startedAt");
+    }
+
+    if (gamesCount !== undefined) {
+      const parsedGamesCount = Number(gamesCount);
+      if (!Number.isInteger(parsedGamesCount) || parsedGamesCount <= 0) {
+        return next(new AppError("gamesCount must be a positive integer", 400));
+      }
+      updateData.gamesCount = parsedGamesCount;
     }
 
     if (endedAt !== undefined) {
@@ -355,8 +639,6 @@ export const updateSessionById = async (req, res, next) => {
       updateData.endedAt !== undefined
         ? updateData.endedAt
         : existingSession.endedAt;
-    const effectiveUnitPrice =
-      updateData.unitPrice ?? Number(existingSession.unitPrice);
 
     if (
       (updateData.status === "ENDED" || updateData.status === "CANCELLED") &&
@@ -379,26 +661,50 @@ export const updateSessionById = async (req, res, next) => {
       );
     }
 
+    const computed = calculateSessionPricing({
+      priceType: existingSession.priceType,
+      amount: existingSession.basePrice || 0,
+      startedAt: effectiveStartedAt,
+      endedAt: finalEndedAt,
+      gamesCount: updateData.gamesCount ?? existingSession.gamesCount ?? 1,
+    });
+
     if (totalPrice !== undefined) {
       updateData.totalPrice = parseMoney(totalPrice, "totalPrice");
-    } else if (updateData.endedAt !== undefined) {
-      updateData.totalPrice = calculateSessionTotal({
-        pricingMode: linkedPricingRule?.pricingMode,
-        unitPrice: effectiveUnitPrice,
-        startedAt: effectiveStartedAt,
-        endedAt: finalEndedAt,
-        fallbackTotalPrice: existingSession.totalPrice,
-      });
+    } else if (
+      updateData.endedAt !== undefined ||
+      updateData.status !== undefined ||
+      updateData.gamesCount !== undefined
+    ) {
+      updateData.totalPrice = computed.totalPrice;
+      updateData.unitPrice = computed.unitPrice;
     }
 
     if (!Object.keys(updateData).length) {
       return next(new AppError("No valid fields to update", 400));
     }
 
-    const updatedSession = await prisma.session.update({
-      where: { id: sessionId },
-      data: updateData,
-      select: sessionSelect,
+    const nextStatus = updateData.status || existingSession.status;
+    const shouldReleaseAvailability =
+      existingSession.status === "ACTIVE" &&
+      (nextStatus === "ENDED" || nextStatus === "CANCELLED");
+
+    const updatedSession = await prisma.$transaction(async (tx) => {
+      const updated = await tx.session.update({
+        where: { id: sessionId },
+        data: updateData,
+        select: sessionSelect,
+      });
+
+      if (shouldReleaseAvailability) {
+        await releaseResourceAvailability(tx, {
+          resourceType: existingSession.resourceType,
+          resourceId: existingSession.resourceId,
+          branchId: existingSession.branchId,
+        });
+      }
+
+      return updated;
     });
 
     res.status(200).json({
@@ -421,10 +727,6 @@ export const endSession = async (req, res, next) => {
     const existingSession = await getSessionByIdOrThrow(sessionId);
     ensureBranchMatch(existingSession.branchId, branchId);
     const actorUserId = await resolveActorUserId(req);
-    const linkedPricingRule = await prisma.pricingRule.findUnique({
-      where: { id: existingSession.pricingRuleId },
-      select: { pricingMode: true },
-    });
     ensureSessionStatusTransition(existingSession.status, "ENDED");
 
     const endedAt = new Date();
@@ -432,24 +734,37 @@ export const endSession = async (req, res, next) => {
       existingSession.startedAt,
       endedAt,
     );
-    const totalPrice = calculateSessionTotal({
-      pricingMode: linkedPricingRule?.pricingMode,
-      unitPrice: existingSession.unitPrice,
+
+    const computed = calculateSessionPricing({
+      priceType: existingSession.priceType,
+      amount: existingSession.basePrice || 0,
       startedAt: existingSession.startedAt,
       endedAt,
-      fallbackTotalPrice: existingSession.totalPrice,
+      gamesCount: existingSession.gamesCount ?? 1,
     });
 
-    const session = await prisma.session.update({
-      where: { id: sessionId },
-      data: {
-        status: "ENDED",
-        endedAt,
-        durationMinutes,
-        totalPrice,
-        endedById: actorUserId,
-      },
-      select: sessionSelect,
+    const session = await prisma.$transaction(async (tx) => {
+      const endedSession = await tx.session.update({
+        where: { id: sessionId },
+        data: {
+          status: "ENDED",
+          endedAt,
+          durationMinutes,
+          gamesCount: existingSession.gamesCount ?? 1,
+          unitPrice: computed.unitPrice,
+          totalPrice: computed.totalPrice,
+          endedById: actorUserId,
+        },
+        select: sessionSelect,
+      });
+
+      await releaseResourceAvailability(tx, {
+        resourceType: existingSession.resourceType,
+        resourceId: existingSession.resourceId,
+        branchId: existingSession.branchId,
+      });
+
+      return endedSession;
     });
 
     res.status(200).json({
@@ -474,16 +789,26 @@ export const cancelSession = async (req, res, next) => {
     const actorUserId = await resolveActorUserId(req);
     ensureSessionStatusTransition(existingSession.status, "CANCELLED");
 
-    const session = await prisma.session.update({
-      where: { id: sessionId },
-      data: {
-        status: "CANCELLED",
-        endedAt: new Date(),
-        durationMinutes: 0,
-        totalPrice: 0,
-        canceledById: actorUserId,
-      },
-      select: sessionSelect,
+    const session = await prisma.$transaction(async (tx) => {
+      const canceledSession = await tx.session.update({
+        where: { id: sessionId },
+        data: {
+          status: "CANCELLED",
+          endedAt: new Date(),
+          durationMinutes: 0,
+          totalPrice: 0,
+          canceledById: actorUserId,
+        },
+        select: sessionSelect,
+      });
+
+      await releaseResourceAvailability(tx, {
+        resourceType: existingSession.resourceType,
+        resourceId: existingSession.resourceId,
+        branchId: existingSession.branchId,
+      });
+
+      return canceledSession;
     });
 
     res.status(200).json({

@@ -63,8 +63,10 @@ import businessSettingsRouter from "./routes/BusinessSettings.js";
 import payrollRouter from "./routes/payroll.js";
 import spaceRouter from "./routes/space.js";
 import deviceRouter from "./routes/device.js";
-import toolRouter from "./routes/tools.js";
+import unitRouter from "./routes/unit.js";
+import equipmentRouter from "./routes/equipment.js";
 import pricingRulesRouter from "./routes/pricingRules.js";
+import resourcePricingRouter from "./routes/resourcePricing.js";
 import planRouter from "./routes/plan.js";
 import storageUsageRouter from "./routes/storageUsage.js";
 import customerRouter from "./routes/customer.js";
@@ -77,7 +79,6 @@ import orderItemRouter from "./routes/orderItem.js";
 import invoiceRouter from "./routes/invoice.js";
 
 import seedRouter from "./seeds/permissions.js";
-import getPermissionIdsByNameRouter from "./seeds/getPermissionsId.js";
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/roles", roleRouter);
@@ -93,8 +94,10 @@ app.use("/api/v1/business-settings", businessSettingsRouter);
 app.use("/api/v1/payrolls", payrollRouter);
 app.use("/api/v1/spaces", spaceRouter);
 app.use("/api/v1/devices", deviceRouter);
-app.use("/api/v1/tools", toolRouter);
+app.use("/api/v1/units", unitRouter);
+app.use("/api/v1/equipments", equipmentRouter);
 app.use("/api/v1/pricing-rules", pricingRulesRouter);
+app.use("/api/v1/resource-pricing", resourcePricingRouter);
 app.use("/api/v1/plans", planRouter);
 app.use("/api/v1/storage-usage", storageUsageRouter);
 app.use("/api/v1/customers", customerRouter);
@@ -107,7 +110,6 @@ app.use("/api/v1/order-items", orderItemRouter);
 app.use("/api/v1/invoices", invoiceRouter);
 
 app.use("/api/v1/seed-permissions", seedRouter);
-app.use("/api/v1/seed-permissions", getPermissionIdsByNameRouter);
 
 app.get("/", (req, res) => {
   res.send("Welcome to Spacefy API");

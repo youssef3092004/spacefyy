@@ -14,16 +14,54 @@ import { cacheMiddleware } from "../middleware/cache.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { upload } from "../middleware/multer.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
+import { prisma } from "../configs/db.js";
+import { AppError } from "../utils/appError.js";
 
 const router = Router();
+
+const resolveOwnerBusinessId = async (req, res, next) => {
+  try {
+    req.body ||= {};
+
+    if (req.body?.businessId) {
+      return next();
+    }
+
+    const userId = req.user?.id || req.user?.userId;
+    if (!userId) {
+      return next(new AppError("Unauthorized", 401));
+    }
+
+    const business = await prisma.business.findFirst({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+
+    if (!business) {
+      return next(new AppError("No business found for this owner", 404));
+    }
+
+    req.body.businessId = business.id;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
 router.post(
   "/create",
   verifyToken,
   checkPermission("CREATE-BRANCHES"),
+  resolveOwnerBusinessId,
+  checkOwnership({
+    model: "business",
+    paramId: "businessId",
+    scope: "business",
+  }),
   upload.single("image"),
   createBranch,
 );
+
 router.put(
   "/update/:branchId",
   verifyToken,

@@ -1,0 +1,5 @@
+[
+  { "id": "01a2b3c4-5d6e-47f8-9a0b-1c2d3e4f5a60", "name": "READ" },
+  { "id": "12b3c4d5-6e7f-48a9-0b1c-2d3e4f5a6b70", "name": "WRITE" },
+  { "id": "23c4d5e6-7f8a-49b0-1c2d-3e4f5a6b7c80", "name": "DELETE" }
+]

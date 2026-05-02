@@ -29,7 +29,11 @@ export const checkOwnership = ({
       }
 
       // DEVELOPER bypass only
-      if (["DEVELOPER"].includes(roleName)) {
+      // DEVELOPER bypass only. OWNER must still prove business ownership.
+      if (
+        roleName === "DEVELOPER" ||
+        (roleName === "OWNER" && scope !== "business")
+      ) {
         req.resourceId = resourceId;
         return next();
       }
@@ -50,13 +54,20 @@ export const checkOwnership = ({
                 }
               : model === "visit"
                 ? { id: true, branchId: true }
-                : { userId: true, branchId: true };
+                : scope === "user"
+                  ? { userId: true, branchId: true }
+                  : { branchId: true }; // device, space, unit, equipment, etc.
 
+      // All standard models use "id" as primary key for findUnique
       const whereField =
         model === "branch" ||
         model === "business" ||
         model === "session" ||
-        model === "visit"
+        model === "visit" ||
+        model === "device" ||
+        model === "space" ||
+        model === "unit" ||
+        model === "equipment"
           ? "id"
           : paramId;
 

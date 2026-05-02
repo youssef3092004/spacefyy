@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createPricingRule,
+  getBranchPricingPanel,
   getPricingRuleById,
   getPriceingRulesByTarget,
   getAllPricingRules,
@@ -15,6 +16,15 @@ import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 
 const router = Router();
+
+router.get(
+  "/panel/:branchId",
+  verifyToken,
+  checkPermission("VIEW-PRICING-RULES", true),
+  checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  cacheMiddleware((req) => `pricing-panel:${req.params.branchId}`, "TTL_LIST"),
+  getBranchPricingPanel,
+);
 
 router.post(
   "/create/:branchId",
@@ -31,7 +41,7 @@ router.get(
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   cacheMiddleware(
     (req) =>
-      `pricingRules:${req.params.branchId}:page=${req.query.page || 1}:limit=${req.query.limit || 10}:pricingType=${req.query.pricingType || "all"}:pricingMode=${req.query.pricingMode || "all"}:isActive=${req.query.isActive || "all"}:spaceId=${req.query.spaceId || "all"}:deviceId=${req.query.deviceId || "all"}:toolId=${req.query.toolId || "all"}`,
+      `pricingRules:${req.params.branchId}:page=${req.query.page || 1}:limit=${req.query.limit || 10}:pricingType=${req.query.pricingType || "all"}:pricingMode=${req.query.pricingMode || "all"}:isActive=${req.query.isActive || "all"}:spaceId=${req.query.spaceId || "all"}:deviceId=${req.query.deviceId || "all"}:unitId=${req.query.unitId || "all"}:equipmentId=${req.query.equipmentId || "all"}`,
     "TTL_LIST",
   ),
   getAllPricingRules,

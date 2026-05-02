@@ -5,8 +5,21 @@ import { indexCacheKeyByRequest } from "../utils/cacheInvalidation.js";
 export const cacheMiddleware = (keyBuilder, type) => {
   return async (req, res, next) => {
     try {
-      const key = keyBuilder(req);
-      const cachedData = await redisClient.get(key);
+      let key;
+      try {
+        key = keyBuilder(req);
+      } catch (error) {
+        console.error("Cache key build failed:", error);
+        return next();
+      }
+
+      let cachedData = null;
+      try {
+        cachedData = await redisClient.get(key);
+      } catch (error) {
+        console.error("Cache read failed:", error);
+        return next();
+      }
 
       if (cachedData) {
         return res.status(200).json({
@@ -24,9 +37,13 @@ export const cacheMiddleware = (keyBuilder, type) => {
           const ttl = parseInt(process.env[ttlEnvKey]);
 
           if (ttl && ttl > 0) {
-            redisClient.setEx(key, ttl, JSON.stringify(body));
+            redisClient.setEx(key, ttl, JSON.stringify(body)).catch((error) => {
+              console.error("Cache write failed:", error);
+            });
           } else {
-            redisClient.set(key, JSON.stringify(body));
+            redisClient.set(key, JSON.stringify(body)).catch((error) => {
+              console.error("Cache write failed:", error);
+            });
           }
 
           indexCacheKeyByRequest(req, key).catch((error) => {
@@ -39,7 +56,8 @@ export const cacheMiddleware = (keyBuilder, type) => {
 
       next();
     } catch (err) {
-      next(err);
+      console.error("Cache middleware failed open:", err);
+      next();
     }
   };
 };

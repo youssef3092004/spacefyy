@@ -170,24 +170,113 @@ export const updateUserPermissionByUserId = async (req, res, next) => {
       return next(new AppError("isAllowed must be a boolean value", 400));
     }
 
-    const updateResult = await prisma.userPermission.updateMany({
+    const uniquePermissionIds = [...new Set(permissionIds)];
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, roleId: true },
+    });
+
+    if (!existingUser) {
+      return next(new AppError("User not found", 404));
+    }
+
+    const existingPermissions = await prisma.permission.findMany({
       where: {
-        userId,
-        permissionId: { in: permissionIds },
+        id: { in: uniquePermissionIds },
       },
-      data: {
-        isAllowed,
+      select: { id: true },
+    });
+
+    if (existingPermissions.length !== uniquePermissionIds.length) {
+      return next(new AppError("One or more permissions not found", 404));
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const existingUserPermissions = await tx.userPermission.findMany({
+        where: {
+          userId,
+          permissionId: { in: uniquePermissionIds },
+        },
+        select: { permissionId: true },
+      });
+
+      const existingPermissionIdSet = new Set(
+        existingUserPermissions.map((item) => item.permissionId),
+      );
+
+      const missingPermissionIds = uniquePermissionIds.filter(
+        (id) => !existingPermissionIdSet.has(id),
+      );
+
+      let rolePermissionMatchedCount = 0;
+
+      if (existingUser.roleId && missingPermissionIds.length > 0) {
+        const roleMatches = await tx.rolePermission.findMany({
+          where: {
+            roleId: existingUser.roleId,
+            permissionId: { in: missingPermissionIds },
+          },
+          select: { permissionId: true },
+        });
+
+        rolePermissionMatchedCount = roleMatches.length;
+      }
+
+      const updateResult = await tx.userPermission.updateMany({
+        where: {
+          userId,
+          permissionId: { in: uniquePermissionIds },
+        },
+        data: {
+          isAllowed,
+        },
+      });
+
+      let createdCount = 0;
+
+      if (missingPermissionIds.length > 0) {
+        const createResult = await tx.userPermission.createMany({
+          data: missingPermissionIds.map((permissionId) => ({
+            userId,
+            permissionId,
+            isAllowed,
+          })),
+          skipDuplicates: true,
+        });
+
+        createdCount = createResult.count;
+      }
+
+      return {
+        updatedCount: updateResult.count,
+        createdCount,
+        rolePermissionMatchedCount,
+      };
+    });
+
+    const permissions = await prisma.permission.findMany({
+      where: {
+        id: { in: uniquePermissionIds },
       },
     });
 
-    if (updateResult.count === 0) {
-      return next(new AppError("No matching permissions found to update", 404));
-    }
+    const userPermissions = await prisma.userPermission.findMany({
+      where: {
+        userId,
+        permissionId: { in: uniquePermissionIds },
+      },
+      include: { permission: true },
+    });
 
     res.status(200).json({
       success: true,
       message: "User permissions updated successfully",
-      updatedCount: updateResult.count,
+      updatedCount: result.updatedCount,
+      createdCount: result.createdCount,
+      rolePermissionMatchedCount: result.rolePermissionMatchedCount,
+      data: userPermissions,
+      permissions,
     });
   } catch (error) {
     next(error);

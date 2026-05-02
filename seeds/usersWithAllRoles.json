@@ -1,0 +1,16 @@
+[
+  {
+    "id": "23344556-7788-49bb-ccdd-eeff00113322",
+    "email": "owner@example.com",
+    "name": "Owner User",
+    "phone": "+1-555-001-1234",
+    "password": "hashed_demo_password"
+  },
+  {
+    "id": "34455667-8899-4cc0-ddee-ff0011334422",
+    "email": "staff@example.com",
+    "name": "Staff User",
+    "phone": "+1-555-002-5678",
+    "password": "hashed_demo_password"
+  }
+]

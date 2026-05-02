@@ -359,34 +359,21 @@ export const getAllPermissionsByUserId = async (req, res, next) => {
       return next(new AppError("User not found", 404));
     }
 
+
     const result = await prisma.$queryRaw`
       SELECT
         p.id,
         p.name,
         CASE
-          WHEN EXISTS (
-            SELECT 1
-            FROM "UserPermission" up
-            WHERE up."permissionId" = p.id
-              AND up."userId" = ${userId}
-              AND up."isAllowed" = TRUE
-          ) THEN TRUE
-          WHEN EXISTS (
-            SELECT 1
-            FROM "UserPermission" up
-            WHERE up."permissionId" = p.id
-              AND up."userId" = ${userId}
-              AND up."isAllowed" = FALSE
-          ) THEN FALSE
-          WHEN EXISTS (
-            SELECT 1
-            FROM "RolePermission" rp
-            WHERE rp."permissionId" = p.id
-              AND rp."roleId" = ${user.roleId}
-          ) THEN TRUE
-          ELSE FALSE
+          WHEN up."isAllowed" IS NOT NULL THEN up."isAllowed"
+          ELSE TRUE
         END AS allowed
       FROM "Permission" p
+      LEFT JOIN "UserPermission" up
+        ON up."permissionId" = p.id AND up."userId" = ${userId}
+      LEFT JOIN "RolePermission" rp
+        ON rp."permissionId" = p.id AND rp."roleId" = ${user.roleId}
+      WHERE up."permissionId" IS NOT NULL OR rp."permissionId" IS NOT NULL
       ORDER BY p.name ASC
     `;
 

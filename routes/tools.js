@@ -10,7 +10,7 @@ import {
   updateToolById,
 } from "../controllers/tools.js";
 import { verifyToken } from "../middleware/auth.js";
-// import { cacheMiddleware } from "../middleware/cache.js";
+import { cacheMiddleware } from "../middleware/cache.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import { upload } from "../middleware/multer.js";
@@ -36,6 +36,20 @@ router.get(
   verifyToken,
   checkPermission("GET-TOOLS", true),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  cacheMiddleware((req) => {
+    const { type, isActive, isBusy, spaceId, deviceId, priceType } = req.query;
+
+    const params = [`branchId=${req.params.branchId}`];
+
+    if (type) params.push(`type=${String(type).toUpperCase()}`);
+    if (isActive !== undefined) params.push(`isActive=${isActive}`);
+    if (isBusy !== undefined) params.push(`isBusy=${isBusy}`);
+    if (spaceId) params.push(`spaceId=${spaceId}`);
+    if (deviceId) params.push(`deviceId=${deviceId}`);
+    if (priceType) params.push(`priceType=${String(priceType).toUpperCase()}`);
+
+    return `tools:${params.join(":")}`;
+  }, "TTL_LIST"),
   getToolsByBranchId,
 );
 router.get(
@@ -43,6 +57,11 @@ router.get(
   verifyToken,
   checkPermission("GET-TOOLS", true),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  cacheMiddleware(
+    (req) =>
+      `tools:branchId=${req.params.branchId}:isActive=${req.params.isActive}:isBusy=${req.query.isBusy || "false"}`,
+    "TTL_LIST",
+  ),
   getToolsByIsActive,
 );
 router.delete(

@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -76,11 +73,28 @@ enum DeviceType {
   OTHER
 }
 
-enum ToolType {
+enum UnitType {
+  GAMING_STATION
+  DESK
+  SEAT
+  SIMULATOR_POD
+  VR_POD
+  MEETING_SEAT
+  LOCKER
+  OTHER
+}
+
+enum EquipmentType {
   CONTROLLER
   HEADSET
+  KEYBOARD
+  MOUSE
   STEERING_WHEEL
+  JOYSTICK
+  FLIGHT_STICK
   PEDALS
+  MICROPHONE
+  WEBCAM
   PING_PONG
   BILLIARDO
   BOARD_GAME
@@ -125,7 +139,8 @@ enum InvoiceStatus {
 enum SessionResourceType {
   SPACE
   DEVICE
-  TOOL
+  UNIT
+  EQUIPMENT
 }
 
 enum SessionStatus {
@@ -134,7 +149,6 @@ enum SessionStatus {
   CANCELLED
 }
 
-// fix it to branch not business
 model BusinessSettings {
   id         String @id @default(uuid())
   businessId String @unique
@@ -242,11 +256,11 @@ model Payroll {
   id             String @id @default(uuid())
   staffProfileId String
 
-  grossSalary Decimal @db.Decimal(12, 2) // baseSalary + bonus + overtime
+  grossSalary Decimal @db.Decimal(12, 2)
   bonus       Decimal @db.Decimal(12, 2)
   overtime    Decimal @default(0)
   deductions  Decimal @default(0)
-  netSalary   Decimal // grossSalary - deductions
+  netSalary   Decimal
 
   method PaymentMethod
   status PayrollStatus @default(PENDING)
@@ -336,7 +350,6 @@ model Business {
 
   owner            User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   plan             Plan              @relation(fields: [planId], references: [id])
-  // subscriptions Subscription[]
   branches         Branch[]
   businessSettings BusinessSettings?
   storageUsage     StorageUsage?
@@ -362,7 +375,8 @@ model Branch {
   staffProfiles         StaffProfile[]
   spaces                Space[]
   devices               Device[]
-  tools                 Tool[]
+  units                 Unit[]
+  equipment             Equipment[]
   BranchUserPermissions BranchUserPermission[]
   visits                Visit[]
   sessions              Session[]
@@ -382,37 +396,57 @@ model BlacklistedToken {
 }
 
 model Space {
-  id              String    @id @default(uuid())
+  id              String      @id @default(uuid())
   branchId        String
   name            String
   type            SpaceType
   customTypeLabel String?
-  image           String    @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
   capacity        Int
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  availableNumber Int         @default(1)
+  priceType       PricingType @default(PER_HOUR)
+  price           Decimal     @default(0) @db.Decimal(10, 2)
+  isActive        Boolean     @default(true)
+  isBusy          Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+  isDeleted       Boolean     @default(false)
+  deletedBy       String?
 
   branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
   devices      Device[]
+  units        Unit[]
   pricingRules PricingRule[]
-  tools        Tool[]
 
   @@index([branchId])
+  @@index([branchId, isBusy, isActive])
+  @@index([deletedAt])
+  @@index([branchId, deletedAt])
+  @@index([isDeleted])
+  @@index([branchId, isDeleted])
 }
 
 model Device {
   id              String      @id @default(uuid())
   branchId        String
   spaceId         String?
+  name            String
   type            DeviceType
   customTypeLabel String?
   image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
   priceType       PricingType @default(PER_HOUR)
   price           Decimal     @default(0) @db.Decimal(12, 2)
+  SGLPS           Decimal?    @default(0) @db.Decimal(12, 2)
+  DBLPS           Decimal?    @default(0) @db.Decimal(12, 2)
+  isSGL           Boolean     @default(true)
   isActive        Boolean     @default(true)
+  isBusy          Boolean     @default(false)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+  isDeleted       Boolean     @default(false)
+  deletedBy       String?
 
   branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
   space        Space?        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -421,37 +455,77 @@ model Device {
   @@index([branchId])
   @@index([branchId, type])
   @@index([spaceId])
+  @@index([branchId, isBusy, isActive])
+  @@index([deletedAt])
+  @@index([isDeleted])
+  @@index([branchId, isDeleted])
+  @@index([branchId, isDeleted, deletedAt])
 }
 
-model Tool {
-  id       String @id @default(uuid())
-  branchId String
-  spaceId  String
-
+model Unit {
+  id              String      @id @default(uuid())
+  branchId        String
+  spaceId         String?
   name            String
-  type            ToolType
+  type            UnitType
   customTypeLabel String?
-  image           String   @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
-  pricePerSession Decimal  @db.Decimal(10, 2)
-  isActive        Boolean  @default(true)
-
-  /**
-   * 🧾 Audit fields
-   */
-  createdBy String
-  updatedBy String
-  deletedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  priceType       PricingType @default(PER_HOUR)
+  price           Decimal     @default(0) @db.Decimal(10, 2)
+  isActive        Boolean     @default(true)
+  isBusy          Boolean     @default(false)
+  isDeleted       Boolean     @default(false)
+  deletedAt       DateTime?
+  deletedBy       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  space        Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  space        Space?        @relation(fields: [spaceId], references: [id], onDelete: SetNull)
   pricingRules PricingRule[]
 
   @@index([branchId])
+  @@index([spaceId])
+  @@index([isDeleted])
   @@index([deletedAt])
-  @@index([branchId, isActive, deletedAt])
+  @@index([branchId, isActive, isDeleted])
+  @@index([branchId, isBusy, isActive, isDeleted])
+  @@index([branchId, type, isDeleted])
+}
+
+model Equipment {
+  id           String  @id @default(uuid())
+  branchId     String
+  resourceName String?
+  resourceId   String?
+
+  name            String
+  type            EquipmentType
+  customTypeLabel String?
+  image           String        @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
+  priceType       PricingType   @default(PER_SESSION)
+  price           Decimal       @default(0) @db.Decimal(10, 2)
+  quantity        Int           @default(1)
+  isActive        Boolean       @default(true)
+  isBusy          Boolean       @default(false)
+  isDeleted       Boolean       @default(false)
+  deletedAt       DateTime?
+  deletedBy       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  pricingRules PricingRule[]
+
+  @@index([branchId])
+  @@index([resourceName])
+  @@index([resourceId])
+  @@index([resourceName, resourceId])
+  @@index([isDeleted])
+  @@index([deletedAt])
+  @@index([branchId, isActive, isDeleted])
+  @@index([branchId, isBusy, isActive, isDeleted])
+  @@index([branchId, type, isDeleted])
 }
 
 model PricingRule {
@@ -475,36 +549,42 @@ model PricingRule {
   pricingMode PricingMode @default(TIME_RANGE)
 
   // Target (ONLY ONE should be set)
-  spaceId  String?
-  deviceId String?
-  toolId   String?
+  spaceId     String?
+  deviceId    String?
+  unitId      String?
+  equipmentId String?
 
-  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  space    Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  device   Device?   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  tool     Tool?     @relation(fields: [toolId], references: [id], onDelete: Cascade)
-  visits   Visit[]
-  sessions Session[]
+  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  space     Space?     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  device    Device?    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  unit      Unit?      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  equipment Equipment? @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  visits    Visit[]
+  sessions  Session[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([spaceId])
   @@index([deviceId])
-  @@index([toolId])
+  @@index([unitId])
+  @@index([equipmentId])
   @@index([isActive])
   @@index([pricingType])
   @@index([pricingMode])
   @@index([priority])
   @@index([spaceId, pricingMode])
   @@index([deviceId, pricingMode])
-  @@index([toolId, pricingMode])
+  @@index([unitId, pricingMode])
+  @@index([equipmentId, pricingMode])
   @@index([spaceId, isActive])
   @@index([deviceId, isActive])
-  @@index([toolId, isActive])
+  @@index([unitId, isActive])
+  @@index([equipmentId, isActive])
   @@index([spaceId, isActive, priority])
   @@index([deviceId, isActive, priority])
-  @@index([toolId, isActive, priority])
+  @@index([unitId, isActive, priority])
+  @@index([equipmentId, isActive, priority])
 }
 
 model Plan {
@@ -521,12 +601,13 @@ model Plan {
   isActive Boolean @default(true)
   isPublic Boolean @default(true)
 
-  maxStaff    Int?
-  maxBranches Int?
-  maxSpaces   Int?
-  maxDevices  Int?
-  maxTools    Int?
-  maxUsers    Int?
+  maxStaff     Int?
+  maxBranches  Int?
+  maxSpaces    Int?
+  maxDevices   Int?
+  maxUnits     Int?
+  maxEquipment Int?
+  maxUsers     Int?
 
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
@@ -536,18 +617,17 @@ model Plan {
   @@index([billingInterval])
 }
 
-// 📊 Storage & Resource Usage Tracking
 model StorageUsage {
   id         String @id @default(uuid())
   businessId String @unique
 
-  // Current Usage (actual)
-  currentBranches Int @default(0)
-  currentSpaces   Int @default(0)
-  currentDevices  Int @default(0)
-  currentTools    Int @default(0)
-  currentStaff    Int @default(0)
-  currentUsers    Int @default(0)
+  currentBranches  Int @default(0)
+  currentSpaces    Int @default(0)
+  currentDevices   Int @default(0)
+  currentUnits     Int @default(0)
+  currentEquipment Int @default(0)
+  currentStaff     Int @default(0)
+  currentUsers     Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -558,18 +638,17 @@ model StorageUsage {
   @@index([businessId])
 }
 
-// 📈 Historical snapshots for analytics
 model StorageUsageHistory {
   id             String @id @default(uuid())
   storageUsageId String
 
-  // Snapshot data
-  branches Int
-  spaces   Int
-  devices  Int
-  tools    Int
-  staff    Int
-  users    Int
+  branches  Int
+  spaces    Int
+  devices   Int
+  units     Int @default(0)
+  equipment Int @default(0)
+  staff     Int
+  users     Int
 
   recordedAt DateTime @default(now())
 
@@ -608,7 +687,6 @@ model Visit {
   customerId    String
   pricingRuleId String?
   pricingMode   PricingMode?
-  unitPrice     Decimal?     @db.Decimal(10, 2)
   totalPrice    Decimal?     @db.Decimal(10, 2)
   startedAt     DateTime
   endedAt       DateTime?
@@ -659,7 +737,11 @@ model Session {
   resourceType SessionResourceType
   resourceId   String
 
-  pricingRuleId String
+  pricingRuleId String?
+
+  priceType  PricingType @default(PER_HOUR)
+  basePrice  Decimal     @default(0) @db.Decimal(10, 2)
+  gamesCount Int         @default(1)
 
   unitPrice  Decimal @db.Decimal(10, 2)
   totalPrice Decimal @db.Decimal(10, 2)
@@ -681,13 +763,13 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branch      Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  visit       Visit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  pricingRule PricingRule @relation(fields: [pricingRuleId], references: [id], onDelete: Restrict)
-  createdBy   User        @relation("SessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  endedBy     User?       @relation("SessionEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
-  canceledBy  User?       @relation("SessionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
-  deletedBy   User?       @relation("SessionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  visit       Visit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
+  createdBy   User         @relation("SessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  endedBy     User?        @relation("SessionEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
+  canceledBy  User?        @relation("SessionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+  deletedBy   User?        @relation("SessionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
 
   @@index([branchId])
   @@index([visitId])

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "d1e2f3a4-b5c6-47d8-9e0f-4a5b6c7d8e90",
+    "businessId": "e1f2a3b4-c5d6-47e8-9f0a-5b6c7d8e9f01",
+    "name": "Main Branch",
+    "address": "123 Demo St",
+    "createdAt": "2026-05-02T00:00:00.000Z",
+    "updatedAt": "2026-05-02T00:00:00.000Z"
+  },
+  {
+    "id": "e2f3a4b5-c6d7-48e9-0f1a-6b7c8d9e0f11",
+    "businessId": "f2a3b4c5-d6e7-48f9-0a1b-6c7d8e9f0112",
+    "name": "Second Branch",
+    "address": "456 Example Ave",
+    "createdAt": "2026-05-02T00:00:00.000Z",
+    "updatedAt": "2026-05-02T00:00:00.000Z"
+  }
+]

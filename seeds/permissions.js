@@ -4,7 +4,7 @@ import { Router } from "express";
 
 const router = Router();
 
-const PERMISSIONS = [
+export const PERMISSIONS = [
   { name: "REGISTER-OWNER", description: "Register business owner" },
   { name: "REGISTER-ADMIN", description: "Register admin user" },
   { name: "REGISTER-STAFF", description: "Register staff user" },
@@ -86,10 +86,15 @@ const PERMISSIONS = [
   { name: "UPDATE-STAFF-PROFILES", description: "Update staff profiles" },
   { name: "DELETE-STAFF-PROFILES", description: "Delete staff profiles" },
 
-  { name: "CREATE-TOOLS", description: "Create tools" },
-  { name: "GET-TOOLS", description: "Get tools" },
-  { name: "UPDATE-TOOLS", description: "Update tools" },
-  { name: "DELETE-TOOLS", description: "Delete tools" },
+  { name: "CREATE-UNITS", description: "Create units" },
+  { name: "VIEW-UNITS", description: "View units" },
+  { name: "UPDATE-UNITS", description: "Update units" },
+  { name: "DELETE-UNITS", description: "Delete units" },
+
+  { name: "CREATE-EQUIPMENT", description: "Create equipment" },
+  { name: "VIEW-EQUIPMENT", description: "View equipment" },
+  { name: "UPDATE-EQUIPMENT", description: "Update equipment" },
+  { name: "DELETE-EQUIPMENT", description: "Delete equipment" },
 
   { name: "VIEW-USERS", description: "View users" },
   { name: "UPDATE-USERS", description: "Update users" },
@@ -155,7 +160,7 @@ const PERMISSIONS = [
   { name: "deleteOrderItem", description: "Delete order items" },
 ];
 
-const ROLES = [
+export const ROLES = [
   { name: "ADMIN", description: "System administrator" },
   { name: "STAFF", description: "Staff member" },
   { name: "CUSTOMER", description: "Customer user" },
@@ -173,8 +178,9 @@ const STAFF_PERMISSIONS = [
   // Spaces
   "VIEW-SPACES",
 
-  // Tools
-  "GET-TOOLS",
+  // Units & Equipment
+  "VIEW-UNITS",
+  "VIEW-EQUIPMENT",
 
   // Pricing Rules (view only)
   "VIEW-PRICING-RULES",
