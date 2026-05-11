@@ -74,7 +74,10 @@ enum DeviceType {
 }
 
 enum UnitType {
+  TABLE_TENNIS_TABLE
+  BILLIARD_TABLE
   GAMING_STATION
+  MULTI_PURPOSE_TABLE
   DESK
   SEAT
   SIMULATOR_POD
@@ -382,10 +385,33 @@ model Branch {
   sessions              Session[]
   pricingRules          PricingRule[]
   products              Product[]
+  monthlyStats          BranchMonthlyStats[]
+  customerBranches      CustomerBranch[]
+  orders                Order[]
 
   @@index([businessId])
   @@index([isActive])
   @@index([createdAt])
+}
+
+model BranchMonthlyStats {
+  id       String @id @default(uuid())
+  branchId String
+  month    Int
+  year     Int
+
+  newCustomers        Int     @default(0)
+  activeCustomers     Int     @default(0)
+  totalRevenue        Decimal @default(0) @db.Decimal(12, 2)
+  avgSpendPerCustomer Decimal @default(0) @db.Decimal(10, 2)
+
+  recordedAt DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, month, year])
+  @@index([branchId])
+  @@index([branchId, year, month])
 }
 
 model BlacklistedToken {
@@ -437,9 +463,6 @@ model Device {
   image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
   priceType       PricingType @default(PER_HOUR)
   price           Decimal     @default(0) @db.Decimal(12, 2)
-  SGLPS           Decimal?    @default(0) @db.Decimal(12, 2)
-  DBLPS           Decimal?    @default(0) @db.Decimal(12, 2)
-  isSGL           Boolean     @default(true)
   isActive        Boolean     @default(true)
   isBusy          Boolean     @default(false)
   createdAt       DateTime    @default(now())
@@ -449,12 +472,12 @@ model Device {
   deletedBy       String?
 
   branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  space        Space?        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  space        Space?        @relation(fields: [spaceId], references: [id])
   pricingRules PricingRule[]
 
   @@index([branchId])
-  @@index([branchId, type])
   @@index([spaceId])
+  @@index([branchId, type])
   @@index([branchId, isBusy, isActive])
   @@index([deletedAt])
   @@index([isDeleted])
@@ -494,16 +517,14 @@ model Unit {
 }
 
 model Equipment {
-  id           String  @id @default(uuid())
-  branchId     String
-  resourceName String?
-  resourceId   String?
+  id       String @id @default(uuid())
+  branchId String
 
   name            String
   type            EquipmentType
   customTypeLabel String?
   image           String        @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
-  priceType       PricingType   @default(PER_SESSION)
+  priceType       PricingType   @default(PER_HOUR)
   price           Decimal       @default(0) @db.Decimal(10, 2)
   quantity        Int           @default(1)
   isActive        Boolean       @default(true)
@@ -518,9 +539,6 @@ model Equipment {
   pricingRules PricingRule[]
 
   @@index([branchId])
-  @@index([resourceName])
-  @@index([resourceId])
-  @@index([resourceName, resourceId])
   @@index([isDeleted])
   @@index([deletedAt])
   @@index([branchId, isActive, isDeleted])
@@ -659,18 +677,27 @@ model StorageUsageHistory {
 }
 
 model Customer {
-  id         String   @id @default(uuid())
-  businessId String
-  seqNumber  Int
-  name       String
-  phone      String
-  email      String?
-  password   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String    @id @default(uuid())
+  businessId    String
+  seqNumber     Int
+  name          String
+  phone         String
+  email         String?
+  password      String?
+  tags          String[]
+  notes         String?
+  birthday      DateTime?
+  isBlocked      Boolean   @default(false)
+  blockedReason  String?
+  discountType   String    @default("FLAT")
+  discountAmount Decimal   @default(0) @db.Decimal(10, 2)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  visits   Visit[]
+  business         Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  visits           Visit[]
+  orders           Order[]
+  customerBranches CustomerBranch[]
 
   @@unique([businessId, seqNumber])
   @@unique([businessId, phone])
@@ -679,6 +706,23 @@ model Customer {
   @@index([businessId])
   @@index([phone])
   @@index([email])
+  @@index([isBlocked])
+}
+
+model CustomerBranch {
+  id           String    @id @default(uuid())
+  customerId   String
+  branchId     String
+  registeredAt DateTime  @default(now())
+  firstVisitAt DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, branchId])
+  @@index([branchId])
+  @@index([customerId])
+  @@index([branchId, registeredAt])
 }
 
 model Visit {
@@ -827,18 +871,28 @@ model Product {
 }
 
 model Order {
-  id         String   @id @default(uuid())
-  visitId    String
-  number     Int      @default(1)
-  totalPrice Decimal  @default(0) @db.Decimal(10, 2)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String   @id @default(uuid())
+  visitId        String?
+  branchId       String?
+  customerId     String?
+  number         Int      @default(1)
+  discountType            String   @default("FLAT")
+  discountAmount          Decimal  @default(0) @db.Decimal(10, 2)
+  customerDiscountType    String   @default("FLAT")
+  customerDiscountAmount  Decimal  @default(0) @db.Decimal(10, 2)
+  totalPrice              Decimal  @default(0) @db.Decimal(10, 2)
+  finalPrice              Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  visit      Visit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  visit      Visit?    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  branch     Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   orderItems OrderItem[]
 
-  @@unique([visitId, number])
   @@index([visitId])
+  @@index([branchId])
+  @@index([customerId])
   @@index([createdAt])
   @@index([visitId, createdAt])
 }

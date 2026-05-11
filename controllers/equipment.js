@@ -19,8 +19,6 @@ const EQUIPMENT_TYPES = [
 
 const PRICING_TYPES = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
 
-const VALID_RESOURCE_NAMES = ["space", "device", "unit"];
-
 const VALID_SORT_FIELDS = [
   "name",
   "type",
@@ -52,33 +50,12 @@ const invalidateListCache = async (branchId) => {
   if (keys.length > 0) await redisClient.del(keys);
 };
 
-const RESOURCE_MODEL_MAP = {
-  space: "space",
-  device: "device",
-  unit: "unit",
-};
-
-const validateResource = async (resourceName, resourceId, branchId) => {
-  const model = RESOURCE_MODEL_MAP[resourceName];
-  const record = await prisma[model].findFirst({
-    where: { id: resourceId, branchId, isDeleted: false },
-    select: { id: true },
-  });
-  if (!record)
-    throw new AppError(
-      `${resourceName.charAt(0).toUpperCase() + resourceName.slice(1)} not found or does not belong to this branch`,
-      404,
-    );
-};
-
 // ─── CREATE ──────────────────────────────────────────────────────────────────
 
 export const createEquipment = async (req, res, next) => {
   try {
     const {
       branchId,
-      resourceName,
-      resourceId,
       name,
       type,
       customTypeLabel,
@@ -95,27 +72,6 @@ export const createEquipment = async (req, res, next) => {
     if (!trimmedName) return next(new AppError("name is required", 400));
     if (!type) return next(new AppError("type is required", 400));
 
-    if (resourceName && !VALID_RESOURCE_NAMES.includes(resourceName))
-      return next(
-        new AppError(
-          `resourceName must be one of: ${VALID_RESOURCE_NAMES.join(", ")}`,
-          400,
-        ),
-      );
-
-    if (resourceName && !resourceId)
-      return next(
-        new AppError("resourceId is required when resourceName is provided", 400),
-      );
-
-    if (resourceId && !resourceName)
-      return next(
-        new AppError(
-          "resourceName is required when resourceId is provided",
-          400,
-        ),
-      );
-
     const fixedType = fixType(type);
 
     if (fixedType === "OTHER" && !customTypeLabel)
@@ -125,10 +81,7 @@ export const createEquipment = async (req, res, next) => {
 
     if (fixedType !== "OTHER" && customTypeLabel)
       return next(
-        new AppError(
-          "customTypeLabel can only be set when type is OTHER",
-          400,
-        ),
+        new AppError("customTypeLabel can only be set when type is OTHER", 400),
       );
 
     const resolvedPriceType = fixPriceType(priceType || "PER_SESSION");
@@ -147,14 +100,6 @@ export const createEquipment = async (req, res, next) => {
     });
     if (!branch) return next(new AppError("Branch not found", 404));
 
-    if (resourceName && resourceId) {
-      try {
-        await validateResource(resourceName, resourceId, branchId);
-      } catch (err) {
-        return next(err);
-      }
-    }
-
     const data = {
       branchId,
       name: trimmedName,
@@ -166,8 +111,6 @@ export const createEquipment = async (req, res, next) => {
       isActive: isActive !== undefined ? Boolean(isActive) : true,
     };
 
-    if (resourceName) data.resourceName = resourceName;
-    if (resourceId) data.resourceId = resourceId;
     if (customTypeLabel) data.customTypeLabel = customTypeLabel;
 
     if (req.file?.buffer) {
@@ -203,8 +146,7 @@ export const getEquipmentById = async (req, res, next) => {
     const { branchId, equipmentId } = req.params;
 
     if (!branchId) return next(new AppError("branchId is required", 400));
-    if (!equipmentId)
-      return next(new AppError("equipmentId is required", 400));
+    if (!equipmentId) return next(new AppError("equipmentId is required", 400));
 
     const equipment = await prisma.equipment.findFirst({
       where: { id: equipmentId, branchId, isDeleted: false },
@@ -262,28 +204,14 @@ export const getAllByBranchId = async (req, res, next) => {
       where.priceType = pt;
     }
 
-    if (req.query.resourceName) {
-      if (!VALID_RESOURCE_NAMES.includes(req.query.resourceName))
-        return next(
-          new AppError(
-            `resourceName must be one of: ${VALID_RESOURCE_NAMES.join(", ")}`,
-            400,
-          ),
-        );
-      where.resourceName = req.query.resourceName;
-    }
-    if (req.query.resourceId) where.resourceId = req.query.resourceId;
-
     if (req.query.name) {
       where.name = { contains: req.query.name, mode: "insensitive" };
     }
 
     if (req.query.priceMin || req.query.priceMax) {
       where.price = {};
-      if (req.query.priceMin)
-        where.price.gte = parseFloat(req.query.priceMin);
-      if (req.query.priceMax)
-        where.price.lte = parseFloat(req.query.priceMax);
+      if (req.query.priceMin) where.price.gte = parseFloat(req.query.priceMin);
+      if (req.query.priceMax) where.price.lte = parseFloat(req.query.priceMax);
     }
 
     if (req.query.quantityMin || req.query.quantityMax) {
@@ -338,8 +266,6 @@ export const getEquipmentByType = async (req, res, next) => {
       where.isBusy = req.query.isBusy === "true";
     if (req.query.priceType)
       where.priceType = String(req.query.priceType).toUpperCase();
-    if (req.query.resourceName) where.resourceName = req.query.resourceName;
-    if (req.query.resourceId) where.resourceId = req.query.resourceId;
 
     const equipmentList = await prisma.equipment.findMany({ where });
 
@@ -355,15 +281,12 @@ export const updateEquipmentById = async (req, res, next) => {
   try {
     const { branchId, equipmentId } = req.params;
     if (!branchId) return next(new AppError("branchId is required", 400));
-    if (!equipmentId)
-      return next(new AppError("equipmentId is required", 400));
+    if (!equipmentId) return next(new AppError("equipmentId is required", 400));
 
     const allowed = [
       "name",
       "type",
       "customTypeLabel",
-      "resourceName",
-      "resourceId",
       "priceType",
       "price",
       "quantity",
@@ -378,27 +301,6 @@ export const updateEquipmentById = async (req, res, next) => {
 
     if (!req.file && Object.keys(updates).length === 0)
       return next(new AppError("No valid fields to update", 400));
-
-    // resourceName and resourceId must be updated together
-    if (
-      (updates.resourceName && !updates.resourceId) ||
-      (!updates.resourceName && updates.resourceId)
-    ) {
-      return next(
-        new AppError(
-          "resourceName and resourceId must be updated together",
-          400,
-        ),
-      );
-    }
-
-    if (updates.resourceName && !VALID_RESOURCE_NAMES.includes(updates.resourceName))
-      return next(
-        new AppError(
-          `resourceName must be one of: ${VALID_RESOURCE_NAMES.join(", ")}`,
-          400,
-        ),
-      );
 
     const existing = await prisma.equipment.findFirst({
       where: { id: equipmentId, branchId, isDeleted: false },
@@ -443,15 +345,8 @@ export const updateEquipmentById = async (req, res, next) => {
 
     if (updates.isBusy !== undefined) updates.isBusy = Boolean(updates.isBusy);
     if (updates.isActive !== undefined)
-      updates.isActive = Boolean(updates.isActive);
-
-    if (updates.resourceName && updates.resourceId) {
-      try {
-        await validateResource(updates.resourceName, updates.resourceId, branchId);
-      } catch (err) {
-        return next(err);
-      }
-    }
+      updates.isActive =
+        updates.isActive === "false" ? false : Boolean(updates.isActive);
 
     if (req.file?.buffer) {
       try {
@@ -487,8 +382,7 @@ export const deleteEquipmentById = async (req, res, next) => {
   try {
     const { branchId, equipmentId } = req.params;
     if (!branchId) return next(new AppError("branchId is required", 400));
-    if (!equipmentId)
-      return next(new AppError("equipmentId is required", 400));
+    if (!equipmentId) return next(new AppError("equipmentId is required", 400));
 
     const equipment = await prisma.equipment.findFirst({
       where: { id: equipmentId, branchId, isDeleted: false },
@@ -540,9 +434,7 @@ export const deleteEquipmentByBranchId = async (req, res, next) => {
     });
 
     if (result.count === 0)
-      return next(
-        new AppError("No equipment to delete for this branch", 404),
-      );
+      return next(new AppError("No equipment to delete for this branch", 404));
 
     await invalidateListCache(branchId);
 

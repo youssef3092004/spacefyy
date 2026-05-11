@@ -3,7 +3,7 @@ import { AppError } from "./appError.js";
 
 export function isValidName(name) {
   return (
-    typeof name === "string" && validator.isLength(name, { min: 5, max: 30 })
+    typeof name === "string" && validator.isLength(name, { min: 3, max: 30 })
   );
 }
 

@@ -5,6 +5,7 @@ import {
   getAllDevices,
   getDeviceById,
   getDevicesByType,
+  getDevicesBySpaceId,
   updateDeviceById,
   deleteDeviceById,
   deleteAllDevices,
@@ -52,7 +53,7 @@ router.get(
   checkPermission("VIEW-DEVICES", true),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   cacheMiddleware((req) => {
-    const { isActive, isBusy, isSGL, spaceId, priceType } = req.query;
+    const { isActive, isBusy, priceType } = req.query;
 
     const params = [
       `branchId=${req.params.branchId}`,
@@ -61,13 +62,18 @@ router.get(
 
     if (isActive !== undefined) params.push(`isActive=${isActive}`);
     if (isBusy !== undefined) params.push(`isBusy=${isBusy}`);
-    if (isSGL !== undefined) params.push(`isSGL=${isSGL}`);
-    if (spaceId) params.push(`spaceId=${spaceId}`);
     if (priceType) params.push(`priceType=${String(priceType).toUpperCase()}`);
 
     return `devices:${params.join(":")}`;
   }, "TTL_LIST"),
   getDevicesByType,
+);
+router.get(
+  "/getBySpaceId/:branchId/:spaceId",
+  verifyToken,
+  checkPermission("VIEW-DEVICES", true),
+  checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  getDevicesBySpaceId,
 );
 router.get(
   "/getAllByBranchId/:branchId",
@@ -83,8 +89,6 @@ router.get(
       type,
       isActive,
       isBusy,
-      isSGL,
-      spaceId,
       priceType,
       priceMin,
       priceMax,
@@ -101,8 +105,6 @@ router.get(
     if (type) params.push(`type=${String(type).toUpperCase()}`);
     if (isActive !== undefined) params.push(`isActive=${isActive}`);
     if (isBusy !== undefined) params.push(`isBusy=${isBusy}`);
-    if (isSGL !== undefined) params.push(`isSGL=${isSGL}`);
-    if (spaceId) params.push(`spaceId=${spaceId}`);
     if (priceType) params.push(`priceType=${String(priceType).toUpperCase()}`);
     if (priceMin) params.push(`priceMin=${priceMin}`);
     if (priceMax) params.push(`priceMax=${priceMax}`);

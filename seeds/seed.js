@@ -78,9 +78,30 @@ async function seedBranch(data) {
 async function seedCustomer(data) {
   for (const record of data) {
     await prisma.customer.upsert({
-      where: { id: record.id },
-      update: record,
-      create: record,
+      where: {
+        businessId_phone: {
+          businessId: record.businessId,
+          phone: record.phone,
+        },
+      },
+      update: {
+        name: record.name,
+        email: record.email || null,
+        tags: record.tags || [],
+        notes: record.notes || null,
+        birthday: record.birthday ? new Date(record.birthday) : null,
+      },
+      create: {
+        id: record.id,
+        businessId: record.businessId,
+        seqNumber: record.seqNumber,
+        name: record.name,
+        phone: record.phone,
+        email: record.email || null,
+        tags: record.tags || [],
+        notes: record.notes || null,
+        birthday: record.birthday ? new Date(record.birthday) : null,
+      },
     });
   }
 }
@@ -105,9 +126,63 @@ async function seedProduct(data) {
   console.log(`  ⚠️  Skipping products (requires category setup)`);
 }
 
+async function seedCustomerBranch(data) {
+  for (const record of data) {
+    await prisma.customerBranch.upsert({
+      where: {
+        customerId_branchId: {
+          customerId: record.customerId,
+          branchId: record.branchId,
+        },
+      },
+      update: {
+        firstVisitAt: record.firstVisitAt ? new Date(record.firstVisitAt) : null,
+      },
+      create: {
+        id: record.id,
+        customerId: record.customerId,
+        branchId: record.branchId,
+        registeredAt: new Date(record.registeredAt),
+        firstVisitAt: record.firstVisitAt ? new Date(record.firstVisitAt) : null,
+      },
+    });
+  }
+}
+
 async function seedSession(data) {
-  // Skip session seeding for now - sessions require complex relationships
-  console.log(`  ⚠️  Skipping sessions (complex relationships required)`);
+  for (const record of data) {
+    await prisma.session.upsert({
+      where: { id: record.id },
+      update: {
+        status: record.status,
+        endedAt: record.endedAt ? new Date(record.endedAt) : null,
+        endedById: record.endedById ?? null,
+        durationMinutes: record.durationMinutes ?? null,
+        totalPrice: parseFloat(record.totalPrice),
+      },
+      create: {
+        id: record.id,
+        branchId: record.branchId,
+        visitId: record.visitId,
+        resourceType: record.resourceType,
+        resourceId: record.resourceId,
+        pricingRuleId: record.pricingRuleId ?? null,
+        priceType: record.priceType || "PER_HOUR",
+        basePrice: parseFloat(record.basePrice ?? 0),
+        gamesCount: record.gamesCount ?? 1,
+        unitPrice: parseFloat(record.unitPrice),
+        totalPrice: parseFloat(record.totalPrice),
+        currency: record.currency || "EGP",
+        startedAt: new Date(record.startedAt),
+        endedAt: record.endedAt ? new Date(record.endedAt) : null,
+        durationMinutes: record.durationMinutes ?? null,
+        status: record.status,
+        createdById: record.createdById,
+        endedById: record.endedById ?? null,
+        canceledById: record.canceledById ?? null,
+      },
+    });
+  }
 }
 
 async function seedSpace(data) {
@@ -132,8 +207,31 @@ async function seedUser(data) {
 }
 
 async function seedVisit(data) {
-  // Skip visit seeding for now - requires valid status values
-  console.log(`  ⚠️  Skipping visits (status validation required)`);
+  for (const record of data) {
+    await prisma.visit.upsert({
+      where: { id: record.id },
+      update: {
+        status: record.status,
+        endedAt: record.endedAt ? new Date(record.endedAt) : null,
+        durationMinutes: record.durationMinutes ?? null,
+        totalPrice:
+          record.totalPrice != null ? parseFloat(record.totalPrice) : null,
+      },
+      create: {
+        id: record.id,
+        branchId: record.branchId,
+        customerId: record.customerId,
+        status: record.status,
+        startedAt: new Date(record.startedAt),
+        endedAt: record.endedAt ? new Date(record.endedAt) : null,
+        durationMinutes: record.durationMinutes ?? null,
+        totalPrice:
+          record.totalPrice != null ? parseFloat(record.totalPrice) : null,
+        pricingRuleId: record.pricingRuleId ?? null,
+        pricingMode: record.pricingMode ?? null,
+      },
+    });
+  }
 }
 
 const seeders = {
@@ -141,6 +239,7 @@ const seeders = {
   business: seedBusiness,
   branch: seedBranch,
   customer: seedCustomer,
+  customerBranch: seedCustomerBranch,
   businessBranch: () => {}, // Skip - duplicate of branch
   permission: seedPermission,
   permissions: seedPermission,
@@ -164,11 +263,12 @@ async function main() {
       "business",
       "branch",
       "customer",
+      "customerBranch",
       "permission",
       "permissions",
       "spaceSeed",
-      "session",
       "visitSession",
+      "session",
       "pricingDemo",
       "product",
       "branchResources",

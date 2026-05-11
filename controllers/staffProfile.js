@@ -4,7 +4,34 @@ import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
 import { messages } from "../locales/message.js";
-import { validateIdNumber } from "../utils/validation.js";
+import {
+  validateIdNumber,
+  isValidName,
+  isValidEmail,
+  isValidPhone,
+  isValidPassword,
+} from "../utils/validation.js";
+import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
+import bcrypt from "bcrypt";
+
+const invalidateStaffProfileCache = async (
+  userId,
+  profileId,
+  branchId,
+  oldBranchId,
+) => {
+  const keys = [
+    `staffProfileUser:${userId}`,
+    `staffProfile:${profileId}`,
+    `staffProfilesBranch:${branchId}`,
+  ];
+  if (oldBranchId && oldBranchId !== branchId)
+    keys.push(`staffProfilesBranch:${oldBranchId}`);
+  await Promise.all([
+    redisClient.del(keys),
+    invalidateCacheByPattern("staffProfiles:*"),
+  ]);
+};
 
 export const createStaffProfile = async (req, res, next) => {
   try {
@@ -506,6 +533,13 @@ export const updateStaffProfileByUserId = async (req, res, next) => {
       },
     });
 
+    await invalidateStaffProfileCache(
+      userId,
+      staffProfile.id,
+      branchId,
+      staffProfile.branchId,
+    );
+
     res.status(200).json({
       status: "success",
       data: updatedStaffProfile,
@@ -532,8 +566,18 @@ export const updateStaffProfileByUserIdPatch = async (req, res, next) => {
       return next(new AppError("Staff profile not found", 404));
     }
 
-    const { branchId, baseSalary, hireDate, position, department, nationalId } =
-      req.body;
+    const {
+      branchId,
+      baseSalary,
+      hireDate,
+      position,
+      department,
+      nationalId,
+      name,
+      phone,
+      email,
+      password,
+    } = req.body;
 
     const existingNationalId = await prisma.nationalId.findUnique({
       where: { staffProfileId: staffProfile.id },
@@ -541,34 +585,79 @@ export const updateStaffProfileByUserIdPatch = async (req, res, next) => {
 
     const uploadedFrontFile = req.files?.frontImage?.[0];
     const uploadedBackFile = req.files?.backImage?.[0];
+    const uploadedProfileImage = req.files?.profileImage?.[0];
 
     const updateData = {};
+    const userUpdateData = {};
 
+    // ── User fields ──────────────────────────────────────────────────────
+    if (name !== undefined) {
+      if (!isValidName(name))
+        return next(new AppError("Invalid name format", 400));
+      userUpdateData.name = name;
+    }
+
+    if (phone !== undefined) {
+      if (!isValidPhone(phone))
+        return next(new AppError("Invalid phone format", 400));
+      const taken = await prisma.user.findUnique({ where: { phone } });
+      if (taken && taken.id !== userId)
+        return next(new AppError("Phone number already in use", 409));
+      userUpdateData.phone = phone;
+    }
+
+    if (email !== undefined) {
+      if (!isValidEmail(email))
+        return next(new AppError("Invalid email format", 400));
+      const taken = await prisma.user.findUnique({ where: { email } });
+      if (taken && taken.id !== userId)
+        return next(new AppError("Email already in use", 409));
+      userUpdateData.email = email;
+    }
+
+    if (password !== undefined) {
+      if (!isValidPassword(password))
+        return next(
+          new AppError(
+            "Password must be at least 8 characters and contain a number and a special character",
+            400,
+          ),
+        );
+      userUpdateData.password = await bcrypt.hash(
+        password,
+        parseInt(process.env.SALT_ROUNDS),
+      );
+    }
+
+    if (uploadedProfileImage) {
+      const uploadResult = await compressAndUpload(
+        uploadedProfileImage.buffer,
+        "profileImages",
+      );
+      userUpdateData.profileImage = uploadResult.secure_url;
+    }
+
+    // ── StaffProfile fields ──────────────────────────────────────────────
     if (branchId) {
-      const branch = await prisma.branch.findUnique({
-        where: { id: branchId },
-      });
-      if (!branch) {
-        return next(new AppError("Branch not found", 404));
-      }
+      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+      if (!branch) return next(new AppError("Branch not found", 404));
       updateData.branchId = branchId;
     }
 
     if (baseSalary !== undefined) {
       const parsedSalary = parseFloat(baseSalary);
-      if (isNaN(parsedSalary) || parsedSalary < 0) {
+      if (isNaN(parsedSalary) || parsedSalary < 0)
         return next(new AppError("baseSalary must be a positive number", 400));
-      }
       updateData.baseSalary = parsedSalary;
     }
 
-    if (hireDate) updateData.hireDate = new Date(hireDate);
+    if (hireDate) {
+      if (isNaN(Date.parse(hireDate)))
+        return next(new AppError("hireDate must be a valid datetime", 400));
+      updateData.hireDate = new Date(hireDate);
+    }
     if (position) updateData.position = position;
     if (department) updateData.department = department;
-
-    if (hireDate && isNaN(Date.parse(hireDate))) {
-      return next(new AppError("hireDate must be a valid datetime", 400));
-    }
 
     const hasNationalIdChanges =
       nationalId !== undefined ||
@@ -695,15 +784,39 @@ export const updateStaffProfileByUserIdPatch = async (req, res, next) => {
       }
     }
 
-    if (!Object.keys(updateData).length) {
+    if (!Object.keys(updateData).length && !Object.keys(userUpdateData).length) {
       return next(new AppError("No valid fields to update", 400));
     }
 
-    const updatedStaffProfile = await prisma.staffProfile.update({
-      where: { userId },
-      data: updateData,
-      include: { nationalId: true },
-    });
+    const [updatedStaffProfile] = await prisma.$transaction([
+      prisma.staffProfile.update({
+        where: { userId },
+        data: updateData,
+        include: {
+          nationalId: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              profileImage: true,
+              role: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
+      ...(Object.keys(userUpdateData).length
+        ? [prisma.user.update({ where: { id: userId }, data: userUpdateData })]
+        : []),
+    ]);
+
+    await invalidateStaffProfileCache(
+      userId,
+      staffProfile.id,
+      updatedStaffProfile.branchId,
+      staffProfile.branchId,
+    );
 
     res.status(200).json({
       success: true,

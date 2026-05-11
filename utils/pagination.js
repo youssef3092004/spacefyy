@@ -1,7 +1,24 @@
 import { AppError } from "./appError.js";
 
+const COMPUTED_SORT_FIELDS = [
+  "totalSpent",
+  "lastBookingAt",
+  "lastActivity",
+  "firstVisitAt",
+  "totalVisits",
+];
+
+export const isComputedSort = (sort) => COMPUTED_SORT_FIELDS.includes(sort);
+
 export const pagination = (req) => {
-  const allowedSortFields = ["createdAt", "email", "updatedAt", "name"];
+  const allowedSortFields = [
+    "createdAt",
+    "email",
+    "updatedAt",
+    "name",
+    "totalSpent",
+    "lastBookingAt",
+  ];
   const allowedOrder = ["asc", "desc"];
 
   if (req.query.sort && !allowedSortFields.includes(req.query.sort)) {

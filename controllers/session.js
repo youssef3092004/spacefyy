@@ -155,7 +155,13 @@ const reserveResourceAvailability = async (
 
   if (resourceType === "UNIT") {
     const updated = await tx.unit.updateMany({
-      where: { id: resourceId, branchId, isActive: true, isDeleted: false, isBusy: false },
+      where: {
+        id: resourceId,
+        branchId,
+        isActive: true,
+        isDeleted: false,
+        isBusy: false,
+      },
       data: { isBusy: true },
     });
     if (updated.count === 0) throw new AppError("Unit is not available", 400);
@@ -164,10 +170,17 @@ const reserveResourceAvailability = async (
 
   if (resourceType === "EQUIPMENT") {
     const updated = await tx.equipment.updateMany({
-      where: { id: resourceId, branchId, isActive: true, isDeleted: false, isBusy: false },
+      where: {
+        id: resourceId,
+        branchId,
+        isActive: true,
+        isDeleted: false,
+        isBusy: false,
+      },
       data: { isBusy: true },
     });
-    if (updated.count === 0) throw new AppError("Equipment is not available", 400);
+    if (updated.count === 0)
+      throw new AppError("Equipment is not available", 400);
   }
 };
 
@@ -279,12 +292,9 @@ const resolveResourcePricing = async ({
       throw new AppError("Space not found for this branch", 404);
     }
 
-    // BUG-FIX-1: Exclude PUBLIC spaces from rental charges
-    const spacePrice = space.type === "PUBLIC" ? 0 : space.price;
-
     return {
       priceType: normalizeSessionPriceType(space.priceType, "PER_HOUR"),
-      price: parseMoney(spacePrice || 0, "space.price"),
+      price: parseMoney(space.price || 0, "space.price"),
     };
   }
 
@@ -320,7 +330,8 @@ const resolveResourcePricing = async ({
     where: { id: resourceId, branchId, isActive: true, isDeleted: false },
     select: { id: true, priceType: true, price: true },
   });
-  if (!equipment) throw new AppError("Equipment not found for this branch", 404);
+  if (!equipment)
+    throw new AppError("Equipment not found for this branch", 404);
   return {
     priceType: normalizeSessionPriceType(equipment.priceType, "PER_SESSION"),
     price: parseMoney(equipment.price || 0, "equipment.price"),
@@ -392,7 +403,7 @@ export const createSession = async (req, res, next) => {
 
     const visit = await prisma.visit.findUnique({
       where: { id: visitId },
-      select: { id: true, branchId: true, status: true },
+      select: { id: true, branchId: true, status: true, customerId: true },
     });
 
     if (!visit) {
@@ -401,6 +412,21 @@ export const createSession = async (req, res, next) => {
 
     if (visit.branchId !== branchId) {
       return next(new AppError("Visit does not belong to this branch", 400));
+    }
+
+    if (visit.customerId) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: visit.customerId },
+        select: { isBlocked: true, blockedReason: true },
+      });
+      if (customer?.isBlocked) {
+        return next(
+          new AppError(
+            `Customer is blocked${customer.blockedReason ? `: ${customer.blockedReason}` : ""}`,
+            403,
+          ),
+        );
+      }
     }
 
     await ensureResourceExists({
@@ -442,8 +468,7 @@ export const createSession = async (req, res, next) => {
     const resolvedDuration = resolvedEndedAt
       ? calculateDurationMinutes(sessionStartedAt, resolvedEndedAt)
       : null;
-    const parsedGamesCount =
-      gamesCount === undefined ? 1 : Number(gamesCount);
+    const parsedGamesCount = gamesCount === undefined ? 1 : Number(gamesCount);
 
     if (!Number.isInteger(parsedGamesCount) || parsedGamesCount <= 0) {
       return next(new AppError("gamesCount must be a positive integer", 400));

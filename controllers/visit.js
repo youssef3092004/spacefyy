@@ -95,13 +95,10 @@ export const startVisit = async (req, res, next) => {
       }),
       prisma.customer.findUnique({
         where: { id: customerId },
-        select: { id: true },
+        select: { id: true, isBlocked: true, blockedReason: true },
       }),
       prisma.visit.findFirst({
-        where: {
-          branchId,
-          customerId,
-        },
+        where: { branchId, customerId },
         orderBy: { startedAt: "desc" },
         select: { status: true },
       }),
@@ -113,6 +110,15 @@ export const startVisit = async (req, res, next) => {
 
     if (!customer) {
       return next(new AppError("Customer not found", 404));
+    }
+
+    if (customer.isBlocked) {
+      return next(
+        new AppError(
+          `Customer is blocked${customer.blockedReason ? `: ${customer.blockedReason}` : ""}`,
+          403,
+        ),
+      );
     }
 
     ensureCanStartVisit(latestVisit?.status);
@@ -138,6 +144,23 @@ export const startVisit = async (req, res, next) => {
         updatedAt: true,
       },
     });
+
+    // Auto-link customer to branch; set firstVisitAt if not yet recorded
+    const existingCB = await prisma.customerBranch.findUnique({
+      where: { customerId_branchId: { customerId, branchId } },
+      select: { firstVisitAt: true },
+    });
+
+    if (!existingCB) {
+      await prisma.customerBranch.create({
+        data: { customerId, branchId, firstVisitAt: visit.startedAt },
+      });
+    } else if (!existingCB.firstVisitAt) {
+      await prisma.customerBranch.update({
+        where: { customerId_branchId: { customerId, branchId } },
+        data: { firstVisitAt: visit.startedAt },
+      });
+    }
 
     res.status(201).json({
       status: "success",
@@ -196,12 +219,12 @@ export const closeVisit = async (req, res, next) => {
       }),
       prisma.order.aggregate({
         where: { visitId },
-        _sum: { totalPrice: true },
+        _sum: { finalPrice: true },
       }),
     ]);
 
     const sessionTotal = Number(sessionTotals._sum.totalPrice ?? 0);
-    const orderTotal = Number(orderTotals._sum.totalPrice ?? 0);
+    const orderTotal = Number(orderTotals._sum.finalPrice ?? 0);
     const finalTotalPrice =
       Math.round((sessionTotal + orderTotal + Number.EPSILON) * 100) / 100;
 

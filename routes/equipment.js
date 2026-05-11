@@ -58,8 +58,6 @@ router.get(
       priceType,
       priceMin,
       priceMax,
-      resourceName,
-      resourceId,
       name,
       quantityMin,
       quantityMax,
@@ -79,8 +77,6 @@ router.get(
     if (priceType) params.push(`priceType=${String(priceType).toUpperCase()}`);
     if (priceMin) params.push(`priceMin=${priceMin}`);
     if (priceMax) params.push(`priceMax=${priceMax}`);
-    if (resourceName) params.push(`resourceName=${resourceName}`);
-    if (resourceId) params.push(`resourceId=${resourceId}`);
     if (name) params.push(`name=${name}`);
     if (quantityMin) params.push(`quantityMin=${quantityMin}`);
     if (quantityMax) params.push(`quantityMax=${quantityMax}`);
@@ -96,7 +92,7 @@ router.get(
   checkPermission("VIEW-EQUIPMENT", true),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   cacheMiddleware((req) => {
-    const { isActive, isBusy, priceType, resourceName, resourceId } = req.query;
+    const { isActive, isBusy, priceType } = req.query;
 
     const params = [
       `branchId=${req.params.branchId}`,
@@ -106,8 +102,6 @@ router.get(
     if (isActive !== undefined) params.push(`isActive=${isActive}`);
     if (isBusy !== undefined) params.push(`isBusy=${isBusy}`);
     if (priceType) params.push(`priceType=${String(priceType).toUpperCase()}`);
-    if (resourceName) params.push(`resourceName=${resourceName}`);
-    if (resourceId) params.push(`resourceId=${resourceId}`);
 
     return `equipment:${params.join(":")}`;
   }, "TTL_LIST"),

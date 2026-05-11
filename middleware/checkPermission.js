@@ -39,7 +39,8 @@ export const checkPermission = (permissionName, requireBranchId = false) => {
         branchId =
           req.params.branchId || req.body?.branchId || req.query?.branchId;
 
-        if (!branchId) {
+        // Owners and developers don't require branchId since they have all permissions
+        if (!branchId && roleName !== "OWNER" && roleName !== "DEVELOPER") {
           return next(
             new AppError(
               `branchId is required for permission: ${permissionName}`,

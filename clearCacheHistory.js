@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createClient } from "redis";
+import process from "process";
 
 async function clearHistoryCache() {
   const redisClient = createClient({

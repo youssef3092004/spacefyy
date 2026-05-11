@@ -10,6 +10,7 @@ import xss from "xss";
 import path from "path";
 import { fileURLToPath } from "url";
 import { startStorageUsageCron } from "./utils/storageUsageCron.js";
+import { startBranchStatsCron } from "./utils/branchStatsCron.js";
 import { autoInvalidateCache } from "./middleware/autoInvalidateCache.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,7 @@ const PORT = process.env.PORT;
 await connectDB();
 await connectRedis();
 startStorageUsageCron();
+startBranchStatsCron();
 
 app.set("trust proxy", 1);
 

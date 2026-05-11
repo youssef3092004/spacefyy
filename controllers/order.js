@@ -164,65 +164,150 @@ const calculateOrderTotal = (items) => {
   return items.reduce((sum, item) => sum + Number(item.totalPrice), 0);
 };
 
+const applyDiscount = (price, type, amount) => {
+  if (!amount || amount <= 0) return price;
+  const raw = type === "PERCENT" ? price * (1 - amount / 100) : price - amount;
+  return Math.max(0, raw);
+};
+
+const computeFinalPrice = (
+  totalPrice,
+  orderDiscountType,
+  orderDiscountAmount,
+  customerDiscountType = "FLAT",
+  customerDiscountAmount = 0,
+) => {
+  const afterOrder = applyDiscount(totalPrice, orderDiscountType, orderDiscountAmount);
+  const afterCustomer = applyDiscount(afterOrder, customerDiscountType, customerDiscountAmount);
+  return Math.round((afterCustomer + Number.EPSILON) * 100) / 100;
+};
+
 /**
- * Create a new order with items
- * POST /orders
- * Body: { visitId, items: [{ productId, quantity }, ...] }
+ * Create a new order with items.
+ * Visit-based:  POST /orders  { visitId, items, discountType?, discountAmount? }
+ * Takeaway:     POST /orders  { branchId, customerId?, items, discountType?, discountAmount? }
  */
 export const createOrder = async (req, res, next) => {
   try {
-    const { visitId, items } = req.body;
+    const {
+      visitId,
+      branchId: bodyBranchId,
+      customerId: bodyCustomerId,
+      items,
+      discountType = "FLAT",
+      discountAmount = 0,
+    } = req.body;
 
-    if (!visitId) {
-      return next(new AppError("visitId is required", 400));
+    if (!visitId && !bodyBranchId) {
+      return next(new AppError("visitId or branchId is required", 400));
     }
 
     if (!Array.isArray(items) || items.length === 0) {
       return next(new AppError("Order must contain at least one item", 400));
     }
 
-    await ensureVisitExists(visitId);
+    const parsedDiscount = Number(discountAmount);
+    if (isNaN(parsedDiscount) || parsedDiscount < 0) {
+      return next(
+        new AppError("discountAmount must be a non-negative number", 400),
+      );
+    }
+    if (!["FLAT", "PERCENT"].includes(discountType)) {
+      return next(new AppError("discountType must be FLAT or PERCENT", 400));
+    }
+    if (discountType === "PERCENT" && parsedDiscount > 100) {
+      return next(new AppError("Percent discount cannot exceed 100", 400));
+    }
+
+    let resolvedBranchId = bodyBranchId;
+    let resolvedCustomerId = bodyCustomerId || null;
+
+    if (visitId) {
+      const visit = await ensureVisitExists(visitId);
+      resolvedBranchId = visit.branchId;
+      resolvedCustomerId = visit.customerId;
+    } else {
+      const branch = await prisma.branch.findUnique({
+        where: { id: bodyBranchId },
+        select: { id: true },
+      });
+      if (!branch) return next(new AppError("Branch not found", 404));
+    }
+
+    let customerDiscountType = "FLAT";
+    let customerDiscountAmount = 0;
+
+    if (resolvedCustomerId) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: resolvedCustomerId },
+        select: {
+          isBlocked: true,
+          blockedReason: true,
+          discountType: true,
+          discountAmount: true,
+        },
+      });
+      if (customer?.isBlocked) {
+        return next(
+          new AppError(
+            `Customer is blocked${customer.blockedReason ? `: ${customer.blockedReason}` : ""}`,
+            403,
+          ),
+        );
+      }
+      if (Number(customer?.discountAmount) > 0) {
+        customerDiscountType = customer.discountType;
+        customerDiscountAmount = Number(customer.discountAmount);
+      }
+    }
 
     const { items: validatedItems, totalPrice } =
       await validateAndPrepareOrderItems(items);
 
+    const finalPrice = computeFinalPrice(
+      totalPrice,
+      discountType,
+      parsedDiscount,
+      customerDiscountType,
+      customerDiscountAmount,
+    );
+
     const order = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Visit" WHERE id = ${visitId} FOR UPDATE`;
+      if (visitId) {
+        await tx.$queryRaw`SELECT id FROM "Visit" WHERE id = ${visitId} FOR UPDATE`;
 
-      const existingOrder = await tx.order.findFirst({
-        where: { visitId },
-        select: { id: true },
-      });
-
-      if (existingOrder) {
-        throw new AppError(
-          "An order for this visit already exists. Please update the existing order instead.",
-          400,
-        );
+        const existingOrder = await tx.order.findFirst({
+          where: { visitId },
+          select: { id: true },
+        });
+        if (existingOrder) {
+          throw new AppError(
+            "An order for this visit already exists. Please update the existing order instead.",
+            400,
+          );
+        }
       }
 
-      const visitOrderCount = await tx.order.count({
-        where: { visitId },
-      });
-      const nextOrderNumber = visitOrderCount + 1;
+      const countWhere = visitId
+        ? { visitId }
+        : { branchId: resolvedBranchId, visitId: null };
+      const orderCount = await tx.order.count({ where: countWhere });
 
       const newOrder = await tx.order.create({
         data: {
-          visitId,
-          number: nextOrderNumber,
+          visitId: visitId || null,
+          branchId: resolvedBranchId,
+          customerId: resolvedCustomerId,
+          number: orderCount + 1,
+          discountType,
+          discountAmount: parsedDiscount,
+          customerDiscountType,
+          customerDiscountAmount,
           totalPrice,
-          orderItems: {
-            create: validatedItems,
-          },
+          finalPrice,
+          orderItems: { create: validatedItems },
         },
         include: {
-          visit: {
-            select: {
-              id: true,
-              branchId: true,
-              customerId: true,
-            },
-          },
           orderItems: {
             select: {
               id: true,
@@ -238,11 +323,7 @@ export const createOrder = async (req, res, next) => {
       for (const item of validatedItems) {
         await tx.product.update({
           where: { id: item.productId },
-          data: {
-            quantity: {
-              decrement: item.quantity,
-            },
-          },
+          data: { quantity: { decrement: item.quantity } },
         });
       }
 
@@ -254,13 +335,16 @@ export const createOrder = async (req, res, next) => {
       message: "Order created successfully",
       data: {
         ...order,
-        totalPrice: Number(order.totalPrice || totalPrice),
+        totalPrice: Number(order.totalPrice),
+        discountType,
+        discountAmount: parsedDiscount,
+        customerDiscountType,
+        customerDiscountAmount,
+        finalPrice: Number(order.finalPrice),
       },
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      return next(error);
-    }
+    if (error instanceof AppError) return next(error);
     if (error.code === "P2002") {
       return next(
         new AppError(
@@ -546,9 +630,13 @@ export const updateOrder = async (req, res, next) => {
         });
       }
 
-      return await tx.order.findUnique({
+      const refreshedOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: {
+        select: {
+          discountType: true,
+          discountAmount: true,
+          customerDiscountType: true,
+          customerDiscountAmount: true,
           orderItems: {
             select: {
               id: true,
@@ -561,16 +649,36 @@ export const updateOrder = async (req, res, next) => {
           },
         },
       });
-    });
 
-    const orderTotal = calculateOrderTotal(updatedOrder.orderItems);
+      const newTotal = calculateOrderTotal(refreshedOrder.orderItems);
+      const newFinal = computeFinalPrice(
+        newTotal,
+        refreshedOrder.discountType,
+        Number(refreshedOrder.discountAmount),
+        refreshedOrder.customerDiscountType,
+        Number(refreshedOrder.customerDiscountAmount),
+      );
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: { totalPrice: newTotal, finalPrice: newFinal },
+      });
+
+      return {
+        ...refreshedOrder,
+        id: orderId,
+        totalPrice: newTotal,
+        finalPrice: newFinal,
+      };
+    });
 
     res.status(200).json({
       success: true,
       message: "Order updated successfully",
       data: {
         ...updatedOrder,
-        totalPrice: orderTotal,
+        totalPrice: Number(updatedOrder.totalPrice),
+        finalPrice: Number(updatedOrder.finalPrice),
       },
     });
   } catch (error) {

@@ -4,7 +4,10 @@ import { compressAndUpload } from "../utils/cloudinary.js";
 import { redisClient } from "../configs/redis.js";
 
 const UNIT_TYPES = [
+  "TABLE_TENNIS_TABLE",
+  "BILLIARD_TABLE",
   "GAMING_STATION",
+  "MULTI_PURPOSE_TABLE",
   "DESK",
   "SEAT",
   "SIMULATOR_POD",
@@ -76,10 +79,7 @@ export const createUnit = async (req, res, next) => {
 
     if (fixedType !== "OTHER" && customTypeLabel)
       return next(
-        new AppError(
-          "customTypeLabel can only be set when type is OTHER",
-          400,
-        ),
+        new AppError("customTypeLabel can only be set when type is OTHER", 400),
       );
 
     const resolvedPriceType = fixPriceType(priceType || "PER_HOUR");
@@ -224,10 +224,8 @@ export const getAllByBranchId = async (req, res, next) => {
     // Price range filter
     if (req.query.priceMin || req.query.priceMax) {
       where.price = {};
-      if (req.query.priceMin)
-        where.price.gte = parseFloat(req.query.priceMin);
-      if (req.query.priceMax)
-        where.price.lte = parseFloat(req.query.priceMax);
+      if (req.query.priceMin) where.price.gte = parseFloat(req.query.priceMin);
+      if (req.query.priceMax) where.price.lte = parseFloat(req.query.priceMax);
     }
 
     const [units, total] = await prisma.$transaction([
@@ -347,9 +345,12 @@ export const updateUnitById = async (req, res, next) => {
         return next(new AppError("price must be a valid number >= 0", 400));
     }
 
-    if (updates.isBusy !== undefined) updates.isBusy = Boolean(updates.isBusy);
+    if (updates.isBusy !== undefined)
+      updates.isBusy =
+        updates.isBusy === "false" ? false : Boolean(updates.isBusy);
     if (updates.isActive !== undefined)
-      updates.isActive = Boolean(updates.isActive);
+      updates.isActive =
+        updates.isActive === "false" ? false : Boolean(updates.isActive);
 
     // SpaceId validation
     if (updates.spaceId) {

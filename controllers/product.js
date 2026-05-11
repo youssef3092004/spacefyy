@@ -242,7 +242,7 @@ export const searchProducts = async (req, res, next) => {
         name: true,
         price: true,
         quantity: true,
-        category: true,
+        category: { select: { id: true, name: true } },
       },
     });
 
@@ -349,7 +349,7 @@ export const deleteProduct = async (req, res, next) => {
       where: { id: productId },
     });
 
-    return res.status(204);
+    return res.status(204).send();
   } catch (error) {
     if (error.code === "P2025") {
       return next(new AppError("Product not found", 404));

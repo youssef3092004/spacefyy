@@ -13,6 +13,7 @@
     "lint:fix": "eslint . --ext .js --fix",
     "build": "prisma generate",
     "seed": "node --env-file=.env seeds/seed.js",
+    "seed:demo": "node --env-file=.env seeds/demoSeed.js",
     "seed:rbac": "node --env-file=.env seeds/rbac.js",
     "seed:permissions": "node --env-file=.env seeds/permissions.js"
   },

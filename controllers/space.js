@@ -181,14 +181,6 @@ export const getSpaceById = async (req, res, next) => {
             type: true,
           },
         },
-        equipment: {
-          where: { isDeleted: false },
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
       },
     });
     if (!space || space === 0) {
