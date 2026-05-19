@@ -7,8 +7,64 @@ import {
   isValidPhone,
 } from "../utils/validation.js";
 import { messages } from "../locales/message.js";
+import { isValidTimeFormat } from "../utils/discountUtils.js";
 
 const VALID_TAGS = ["VIP", "Regular", "Blacklisted", "New", "Loyal"];
+
+const formatCustomer = (customer) => {
+  if (!customer) return customer;
+  const {
+    isBlocked,
+    blockedReason,
+    hasDiscount,
+    discountType,
+    discountAmount,
+    discountStartsAt,
+    discountEndsAt,
+    discountStartTime,
+    discountEndTime,
+    ...rest
+  } = customer;
+
+  return {
+    ...rest,
+    block: { isBlocked, blockedReason },
+    discount: {
+      hasDiscount,
+      discountType,
+      discountAmount,
+      discountStartsAt,
+      discountEndsAt,
+      discountStartTime,
+      discountEndTime,
+    },
+  };
+};
+
+const formatOrder = (order) => {
+  if (!order) return null;
+
+  const { orderItems = [], ...orderData } = order;
+
+  return {
+    ...orderData,
+    orderItems,
+  };
+};
+
+const formatVisitWithOrder = (visit) => {
+  const { orders = [], ...visitData } = visit;
+  const [firstOrder] = orders;
+
+  if (!firstOrder) {
+    return visitData;
+  }
+
+  return {
+    ...visitData,
+    order: formatOrder(firstOrder),
+  };
+};
 
 const createCustomerWithScopedSequence = async ({
   businessId,
@@ -19,8 +75,13 @@ const createCustomerWithScopedSequence = async ({
   tags,
   notes,
   birthday,
+  hasDiscount = false,
   discountType = "FLAT",
   discountAmount = 0,
+  discountStartsAt = null,
+  discountEndsAt = null,
+  discountStartTime = null,
+  discountEndTime = null,
 }) => {
   const maxRetries = 5;
 
@@ -46,8 +107,13 @@ const createCustomerWithScopedSequence = async ({
             tags: tags || [],
             notes: notes || null,
             birthday: birthday ? new Date(birthday) : null,
+            hasDiscount,
             discountType,
             discountAmount,
+            discountStartsAt,
+            discountEndsAt,
+            discountStartTime,
+            discountEndTime,
           },
         });
       });
@@ -78,8 +144,13 @@ export const createCustomer = async (req, res, next) => {
       notes,
       birthday,
       branchId,
+      hasDiscount = false,
       discountType = "FLAT",
       discountAmount = 0,
+      discountStartsAt,
+      discountEndsAt,
+      discountStartTime,
+      discountEndTime,
     } = req.body;
     const rawTags = req.body.tags;
     const tags =
@@ -142,10 +213,54 @@ export const createCustomer = async (req, res, next) => {
     }
     const parsedDiscount = Number(discountAmount);
     if (isNaN(parsedDiscount) || parsedDiscount < 0) {
-      return next(new AppError("discountAmount must be a non-negative number", 400));
+      return next(
+        new AppError("discountAmount must be a non-negative number", 400),
+      );
     }
     if (discountType === "PERCENT" && parsedDiscount > 100) {
       return next(new AppError("Percent discount cannot exceed 100", 400));
+    }
+
+    if (
+      discountStartsAt !== undefined &&
+      isNaN(new Date(discountStartsAt).getTime())
+    ) {
+      return next(new AppError("Invalid discountStartsAt date", 400));
+    }
+    if (
+      discountEndsAt !== undefined &&
+      isNaN(new Date(discountEndsAt).getTime())
+    ) {
+      return next(new AppError("Invalid discountEndsAt date", 400));
+    }
+    if (
+      discountStartsAt &&
+      discountEndsAt &&
+      new Date(discountStartsAt) > new Date(discountEndsAt)
+    ) {
+      return next(
+        new AppError("discountStartsAt must be before discountEndsAt", 400),
+      );
+    }
+    if (
+      discountStartTime !== undefined &&
+      !isValidTimeFormat(discountStartTime)
+    ) {
+      return next(
+        new AppError("discountStartTime must be in HH:MM format", 400),
+      );
+    }
+    if (discountEndTime !== undefined && !isValidTimeFormat(discountEndTime)) {
+      return next(new AppError("discountEndTime must be in HH:MM format", 400));
+    }
+    if (
+      discountStartTime &&
+      discountEndTime &&
+      discountStartTime >= discountEndTime
+    ) {
+      return next(
+        new AppError("discountStartTime must be before discountEndTime", 400),
+      );
     }
 
     if (branchId) {
@@ -197,8 +312,13 @@ export const createCustomer = async (req, res, next) => {
       tags,
       notes,
       birthday,
+      hasDiscount: Boolean(hasDiscount),
       discountType,
       discountAmount: parsedDiscount,
+      discountStartsAt: discountStartsAt ? new Date(discountStartsAt) : null,
+      discountEndsAt: discountEndsAt ? new Date(discountEndsAt) : null,
+      discountStartTime: discountStartTime || null,
+      discountEndTime: discountEndTime || null,
     });
 
     if (branchId) {
@@ -209,7 +329,7 @@ export const createCustomer = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      data: customer,
+      data: formatCustomer(customer),
       source: "database",
     });
   } catch (error) {
@@ -233,6 +353,41 @@ export const getCustomerById = async (req, res, next) => {
       return next(new AppError("Customer ID is required", 400));
     }
 
+    const visitsPage = Math.max(1, parseInt(req.query.visitsPage) || 1);
+    const visitsLimit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.visitsLimit) || 10),
+    );
+    const visitsSkip = (visitsPage - 1) * visitsLimit;
+    const VISITS_SORT_FIELDS = [
+      "startedAt",
+      "endedAt",
+      "totalPrice",
+      "durationMinutes",
+      "createdAt",
+    ];
+    const visitsSort = VISITS_SORT_FIELDS.includes(req.query.visitsSort)
+      ? req.query.visitsSort
+      : "startedAt";
+    const visitsOrder = req.query.visitsOrder === "asc" ? "asc" : "desc";
+
+    const ordersPage = Math.max(1, parseInt(req.query.ordersPage) || 1);
+    const ordersLimit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.ordersLimit) || 10),
+    );
+    const ordersSkip = (ordersPage - 1) * ordersLimit;
+    const ORDERS_SORT_FIELDS = [
+      "createdAt",
+      "totalPrice",
+      "finalPrice",
+      "number",
+    ];
+    const ordersSort = ORDERS_SORT_FIELDS.includes(req.query.ordersSort)
+      ? req.query.ordersSort
+      : "createdAt";
+    const ordersOrder = req.query.ordersOrder === "asc" ? "asc" : "desc";
+
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
       omit: { password: true },
@@ -243,8 +398,29 @@ export const getCustomerById = async (req, res, next) => {
           },
           orderBy: { registeredAt: "asc" },
         },
-        visits: {
-          orderBy: { startedAt: "desc" },
+      },
+    });
+
+    if (!customer) {
+      return next(new AppError("Customer not found", 404));
+    }
+
+    const [visitsTotal, ordersTotal, visitStats, visits, orders] =
+      await Promise.all([
+        prisma.visit.count({ where: { customerId } }),
+        prisma.order.count({ where: { customerId, visitId: null } }),
+        prisma.visit.aggregate({
+          where: { customerId },
+          _sum: { totalPrice: true },
+          _min: { startedAt: true },
+          _max: { startedAt: true },
+          _avg: { durationMinutes: true },
+        }),
+        prisma.visit.findMany({
+          where: { customerId },
+          orderBy: { [visitsSort]: visitsOrder },
+          skip: visitsSkip,
+          take: visitsLimit,
           select: {
             id: true,
             branchId: true,
@@ -289,10 +465,12 @@ export const getCustomerById = async (req, res, next) => {
               },
             },
           },
-        },
-        orders: {
-          where: { visitId: null },
-          orderBy: { createdAt: "desc" },
+        }),
+        prisma.order.findMany({
+          where: { customerId, visitId: null },
+          orderBy: { [ordersSort]: ordersOrder },
+          skip: ordersSkip,
+          take: ordersLimit,
           select: {
             id: true,
             branchId: true,
@@ -312,43 +490,47 @@ export const getCustomerById = async (req, res, next) => {
               },
             },
           },
-        },
-      },
-    });
-
-    if (!customer) {
-      return next(new AppError("Customer not found", 404));
-    }
-
-    const visits = customer.visits ?? [];
-    const durations = visits
-      .map((v) => v.durationMinutes)
-      .filter((d) => d != null);
+        }),
+      ]);
 
     const analytics = {
-      totalVisits: visits.length,
-      totalSpend: visits.reduce((sum, v) => sum + Number(v.totalPrice ?? 0), 0),
-      lastActivity:
-        visits.length > 0
-          ? visits.reduce((latest, v) =>
-              new Date(v.startedAt) > new Date(latest.startedAt) ? v : latest,
-            ).startedAt
-          : null,
-      firstVisitAt:
-        visits.length > 0
-          ? visits.reduce((earliest, v) =>
-              new Date(v.startedAt) < new Date(earliest.startedAt) ? v : earliest,
-            ).startedAt
-          : null,
-      avgDurationMinutes:
-        durations.length > 0
-          ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length)
-          : null,
+      totalVisits: visitsTotal,
+      totalSpend: Number(visitStats._sum.totalPrice ?? 0),
+      lastActivity: visitStats._max.startedAt ?? null,
+      firstVisitAt: visitStats._min.startedAt ?? null,
+      avgDurationMinutes: visitStats._avg.durationMinutes
+        ? Math.round(visitStats._avg.durationMinutes)
+        : null,
     };
 
     res.status(200).json({
       success: true,
-      data: { ...customer, analytics },
+      data: {
+        ...formatCustomer(customer),
+        analytics,
+        visits: {
+          data: visits.map(formatVisitWithOrder),
+          pagination: {
+            total: visitsTotal,
+            page: visitsPage,
+            limit: visitsLimit,
+            totalPages: Math.ceil(visitsTotal / visitsLimit),
+            sort: visitsSort,
+            order: visitsOrder,
+          },
+        },
+        orders: {
+          data: orders,
+          pagination: {
+            total: ordersTotal,
+            page: ordersPage,
+            limit: ordersLimit,
+            totalPages: Math.ceil(ordersTotal / ordersLimit),
+            sort: ordersSort,
+            order: ordersOrder,
+          },
+        },
+      },
       source: "database",
     });
   } catch (error) {
@@ -396,7 +578,7 @@ export const getAllCustomersBybusinessId = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: customers,
+      data: customers.map(formatCustomer),
       meta: {
         page,
         limit,
@@ -434,7 +616,7 @@ export const getAllCustomers = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Customers retrieved successfully",
-      data: customers,
+      data: customers.map(formatCustomer),
       meta: {
         page,
         limit,
@@ -474,8 +656,13 @@ export const updateCustomerByIdPatch = async (req, res, next) => {
       "tags",
       "notes",
       "birthday",
+      "hasDiscount",
       "discountType",
       "discountAmount",
+      "discountStartsAt",
+      "discountEndsAt",
+      "discountStartTime",
+      "discountEndTime",
     ];
     const updateData = { ...req.body };
 
@@ -532,7 +719,9 @@ export const updateCustomerByIdPatch = async (req, res, next) => {
     if (updateData.discountAmount !== undefined) {
       const parsed = Number(updateData.discountAmount);
       if (isNaN(parsed) || parsed < 0) {
-        return next(new AppError("discountAmount must be a non-negative number", 400));
+        return next(
+          new AppError("discountAmount must be a non-negative number", 400),
+        );
       }
       const type = updateData.discountType ?? existingCustomer.discountType;
       if (type === "PERCENT" && parsed > 100) {
@@ -540,6 +729,83 @@ export const updateCustomerByIdPatch = async (req, res, next) => {
       }
       updateData.discountAmount = parsed;
     }
+
+    if (
+      updateData.discountStartsAt !== undefined &&
+      updateData.discountStartsAt !== null &&
+      isNaN(new Date(updateData.discountStartsAt).getTime())
+    ) {
+      return next(new AppError("Invalid discountStartsAt date", 400));
+    }
+    if (
+      updateData.discountEndsAt !== undefined &&
+      updateData.discountEndsAt !== null &&
+      isNaN(new Date(updateData.discountEndsAt).getTime())
+    ) {
+      return next(new AppError("Invalid discountEndsAt date", 400));
+    }
+
+    const resolvedStartsAt =
+      updateData.discountStartsAt !== undefined
+        ? updateData.discountStartsAt
+        : existingCustomer.discountStartsAt;
+    const resolvedEndsAt =
+      updateData.discountEndsAt !== undefined
+        ? updateData.discountEndsAt
+        : existingCustomer.discountEndsAt;
+
+    if (
+      resolvedStartsAt &&
+      resolvedEndsAt &&
+      new Date(resolvedStartsAt) > new Date(resolvedEndsAt)
+    ) {
+      return next(
+        new AppError("discountStartsAt must be before discountEndsAt", 400),
+      );
+    }
+
+    if (
+      updateData.discountStartTime !== undefined &&
+      updateData.discountStartTime !== null &&
+      !isValidTimeFormat(updateData.discountStartTime)
+    ) {
+      return next(
+        new AppError("discountStartTime must be in HH:MM format", 400),
+      );
+    }
+    if (
+      updateData.discountEndTime !== undefined &&
+      updateData.discountEndTime !== null &&
+      !isValidTimeFormat(updateData.discountEndTime)
+    ) {
+      return next(new AppError("discountEndTime must be in HH:MM format", 400));
+    }
+
+    const resolvedStartTime =
+      updateData.discountStartTime !== undefined
+        ? updateData.discountStartTime
+        : existingCustomer.discountStartTime;
+    const resolvedEndTime =
+      updateData.discountEndTime !== undefined
+        ? updateData.discountEndTime
+        : existingCustomer.discountEndTime;
+
+    if (
+      resolvedStartTime &&
+      resolvedEndTime &&
+      resolvedStartTime >= resolvedEndTime
+    ) {
+      return next(
+        new AppError("discountStartTime must be before discountEndTime", 400),
+      );
+    }
+
+    if (updateData.discountStartsAt)
+      updateData.discountStartsAt = new Date(updateData.discountStartsAt);
+    if (updateData.discountEndsAt)
+      updateData.discountEndsAt = new Date(updateData.discountEndsAt);
+    if (updateData.hasDiscount !== undefined)
+      updateData.hasDiscount = Boolean(updateData.hasDiscount);
 
     if (updateData.phone && updateData.phone !== existingCustomer.phone) {
       const existingPhone = await prisma.customer.findUnique({
@@ -578,8 +844,59 @@ export const updateCustomerByIdPatch = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: updatedCustomer,
+      data: formatCustomer(updatedCustomer),
       source: "database",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getCustomerAnalytics = async (req, res, next) => {
+  try {
+    const { customerId } = req.params;
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true, name: true },
+    });
+    if (!customer) return next(new AppError("Customer not found", 404));
+
+    const [visitStats, orderStats, lastVisit] = await Promise.all([
+      prisma.visit.aggregate({
+        where: { customerId },
+        _count: { id: true },
+        _sum: { totalPrice: true },
+      }),
+      prisma.order.aggregate({
+        where: { customerId, visitId: null, status: "COMPLETED" },
+        _count: { id: true },
+        _sum: { finalPrice: true },
+      }),
+      prisma.visit.findFirst({
+        where: { customerId },
+        orderBy: { startedAt: "desc" },
+        select: { startedAt: true, status: true },
+      }),
+    ]);
+
+    const visitRevenue = Number(visitStats._sum.totalPrice ?? 0);
+    const orderRevenue = Number(orderStats._sum.finalPrice ?? 0);
+    const visitCount = visitStats._count.id;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        visitCount,
+        takeawayOrderCount: orderStats._count.id,
+        visitRevenue: Math.round(visitRevenue * 100) / 100,
+        orderRevenue: Math.round(orderRevenue * 100) / 100,
+        totalSpend: Math.round((visitRevenue + orderRevenue) * 100) / 100,
+        averageSpendPerVisit:
+          visitCount > 0 ? Math.round((visitRevenue / visitCount) * 100) / 100 : 0,
+        lastVisitAt: lastVisit?.startedAt ?? null,
+        lastVisitStatus: lastVisit?.status ?? null,
+      },
     });
   } catch (error) {
     next(error);
@@ -826,7 +1143,7 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
 
     // ── Per-customer list ────────────────────────────────────────────────
     const buildCustomerRow = (customer, stats) => ({
-      ...customer,
+      ...formatCustomer(customer),
       analytics: {
         totalVisits: stats?._count.id ?? 0,
         totalSpend: Number(stats?._sum.totalPrice ?? 0),
@@ -1086,7 +1403,7 @@ export const blockCustomer = async (req, res, next) => {
       data: { isBlocked: true, blockedReason: reason || null },
     });
 
-    res.status(200).json({ success: true, data: updated });
+    res.status(200).json({ success: true, data: formatCustomer(updated) });
   } catch (error) {
     next(error);
   }
@@ -1110,7 +1427,7 @@ export const unblockCustomer = async (req, res, next) => {
       data: { isBlocked: false, blockedReason: null },
     });
 
-    res.status(200).json({ success: true, data: updated });
+    res.status(200).json({ success: true, data: formatCustomer(updated) });
   } catch (error) {
     next(error);
   }

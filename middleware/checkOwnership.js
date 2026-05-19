@@ -67,7 +67,8 @@ export const checkOwnership = ({
         model === "device" ||
         model === "space" ||
         model === "unit" ||
-        model === "equipment"
+        model === "equipment" ||
+        model === "product"
           ? "id"
           : paramId;
 

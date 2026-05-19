@@ -1,11 +1,13 @@
 import { Router } from "express";
 import {
   createInvoice,
+  createOrderInvoice,
   deleteInvoice,
   getAllInvoices,
   getInvoiceById,
   getInvoiceByVisitId,
   payInvoice,
+  payInvoiceById,
 } from "../controllers/invoice.js";
 import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
@@ -18,6 +20,20 @@ router.post(
   verifyToken,
   checkPermission("CREATE-INVOICES"),
   createInvoice,
+);
+
+router.post(
+  "/createOrder/:orderId",
+  verifyToken,
+  checkPermission("CREATE-INVOICES"),
+  createOrderInvoice,
+);
+
+router.patch(
+  "/payById/:invoiceId",
+  verifyToken,
+  checkPermission("UPDATE-INVOICES"),
+  payInvoiceById,
 );
 
 router.patch(

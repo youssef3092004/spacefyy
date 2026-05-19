@@ -1,26 +1,38 @@
 [
   {
-    "id": "01122334-5566-47aa-bbcc-ddeeff223344",
-    "branchId": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
-    "name": "Main Space",
+    "id": "sp000001-0000-4000-8000-000000000001",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "name": "Gaming Hall",
     "type": "PUBLIC",
-    "capacity": 50,
-    "availableNumber": 1,
-    "priceType": "PER_HOUR",
-    "price": "100",
-    "isActive": true,
-    "createdAt": "2025-02-26T10:00:00Z"
-  },
-  {
-    "id": "12233445-6677-48bb-ccdd-eeff33445566",
-    "branchId": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
-    "name": "Secondary Space",
-    "type": "PRIVATE",
     "capacity": 20,
     "availableNumber": 1,
     "priceType": "PER_HOUR",
-    "price": "150",
+    "price": "80",
     "isActive": true,
-    "createdAt": "2025-02-26T10:00:00Z"
+    "createdAt": "2025-01-15T10:00:00Z"
+  },
+  {
+    "id": "sp000002-0000-4000-8000-000000000002",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "name": "VIP Room",
+    "type": "VIP",
+    "capacity": 6,
+    "availableNumber": 1,
+    "priceType": "PER_HOUR",
+    "price": "120",
+    "isActive": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  },
+  {
+    "id": "sp000003-0000-4000-8000-000000000003",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "name": "Meeting Room",
+    "type": "MEETING",
+    "capacity": 8,
+    "availableNumber": 1,
+    "priceType": "PER_SESSION",
+    "price": "200",
+    "isActive": true,
+    "createdAt": "2025-01-15T10:00:00Z"
   }
 ]

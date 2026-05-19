@@ -119,12 +119,9 @@ export const changeStatusPayroll = async (req, res, next) => {
     if (!payroll) {
       return next(new AppError("Payroll record not found", 404));
     }
-    if (payroll.status !== "PENDING" || payroll.status === "PAID") {
+    if (payroll.status !== "PENDING") {
       return next(
-        new AppError(
-          "Only pending or paid payrolls can be approved or rejected",
-          400,
-        ),
+        new AppError("Only pending payrolls can be approved or rejected", 400),
       );
     }
 

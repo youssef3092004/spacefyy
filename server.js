@@ -79,6 +79,7 @@ import categoryRouter from "./routes/category.js";
 import orderRouter from "./routes/order.js";
 import orderItemRouter from "./routes/orderItem.js";
 import invoiceRouter from "./routes/invoice.js";
+import analyticsRouter from "./routes/analytics.js";
 
 import seedRouter from "./seeds/permissions.js";
 
@@ -110,6 +111,7 @@ app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/orders", orderRouter);
 app.use("/api/v1/order-items", orderItemRouter);
 app.use("/api/v1/invoices", invoiceRouter);
+app.use("/api/v1/analytics", analyticsRouter);
 
 app.use("/api/v1/seed-permissions", seedRouter);
 

@@ -34,22 +34,34 @@ const ensureVisitExists = async (visitId) => {
   return visit;
 };
 
+const INVOICE_INCLUDE = {
+  visit: {
+    select: {
+      id: true,
+      branchId: true,
+      customerId: true,
+      status: true,
+      startedAt: true,
+      endedAt: true,
+      totalPrice: true,
+    },
+  },
+  order: {
+    select: {
+      id: true,
+      number: true,
+      branchId: true,
+      status: true,
+      finalPrice: true,
+      createdAt: true,
+    },
+  },
+};
+
 const ensureInvoiceExists = async (invoiceId) => {
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
-    include: {
-      visit: {
-        select: {
-          id: true,
-          branchId: true,
-          customerId: true,
-          status: true,
-          startedAt: true,
-          endedAt: true,
-          totalPrice: true,
-        },
-      },
-    },
+    include: INVOICE_INCLUDE,
   });
 
   if (!invoice) {
@@ -134,21 +146,11 @@ export const createInvoice = async (req, res, next) => {
       const invoice = await tx.invoice.create({
         data: {
           visitId,
+          branchId: visit.branchId,
           totalAmount,
           status: "UNPAID",
         },
-        include: {
-          visit: {
-            select: {
-              id: true,
-              branchId: true,
-              customerId: true,
-              status: true,
-              startedAt: true,
-              endedAt: true,
-            },
-          },
-        },
+        include: INVOICE_INCLUDE,
       });
 
       await tx.visit.update({
@@ -206,20 +208,8 @@ export const payInvoice = async (req, res, next) => {
     const paidInvoice = await prisma.$transaction(async (tx) => {
       const updated = await tx.invoice.update({
         where: { visitId },
-        data: {
-          status: "PAID",
-          paidAt: new Date(),
-        },
-        include: {
-          visit: {
-            select: {
-              id: true,
-              branchId: true,
-              customerId: true,
-              status: true,
-            },
-          },
-        },
+        data: { status: "PAID", paidAt: new Date() },
+        include: INVOICE_INCLUDE,
       });
 
       await tx.visit.update({
@@ -275,18 +265,7 @@ export const getInvoiceByVisitId = async (req, res, next) => {
 
     const invoice = await prisma.invoice.findUnique({
       where: { visitId },
-      include: {
-        visit: {
-          select: {
-            id: true,
-            branchId: true,
-            customerId: true,
-            status: true,
-            startedAt: true,
-            endedAt: true,
-          },
-        },
-      },
+      include: INVOICE_INCLUDE,
     });
 
     if (!invoice) {
@@ -321,13 +300,7 @@ export const getAllInvoices = async (req, res, next) => {
 
     const where = {
       ...(status ? { status } : {}),
-      ...(branchId
-        ? {
-            visit: {
-              branchId,
-            },
-          }
-        : {}),
+      OR: [{ branchId }, { visit: { branchId } }],
     };
 
     const [invoices, total] = await Promise.all([
@@ -335,21 +308,8 @@ export const getAllInvoices = async (req, res, next) => {
         where,
         skip,
         take: limit,
-        orderBy: {
-          [sort]: order,
-        },
-        include: {
-          visit: {
-            select: {
-              id: true,
-              branchId: true,
-              customerId: true,
-              status: true,
-              startedAt: true,
-              endedAt: true,
-            },
-          },
-        },
+        orderBy: { [sort]: order },
+        include: INVOICE_INCLUDE,
       }),
       prisma.invoice.count({ where }),
     ]);
@@ -363,6 +323,95 @@ export const getAllInvoices = async (req, res, next) => {
         totalPages: Math.ceil(total / limit),
       },
       data: invoices.map(normalizeInvoice),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /invoices/createOrder/:orderId
+ */
+export const createOrderInvoice = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, branchId: true, status: true, visitId: true, finalPrice: true },
+    });
+
+    if (!order) return next(new AppError("Order not found", 404));
+    if (order.visitId) {
+      return next(new AppError("Use the visit invoice endpoint for visit orders", 400));
+    }
+    if (order.status !== "COMPLETED") {
+      return next(new AppError("Cannot invoice an order that is not completed", 400));
+    }
+
+    const existing = await prisma.invoice.findUnique({
+      where: { orderId },
+      select: { id: true },
+    });
+    if (existing) return next(new AppError("Invoice already exists for this order", 409));
+
+    const invoice = await prisma.invoice.create({
+      data: {
+        orderId,
+        branchId: order.branchId,
+        totalAmount: Number(order.finalPrice),
+        status: "UNPAID",
+      },
+      include: INVOICE_INCLUDE,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Invoice created successfully",
+      data: normalizeInvoice(invoice),
+    });
+  } catch (error) {
+    if (error?.code === "P2002") return next(new AppError("Invoice already exists for this order", 409));
+    next(error);
+  }
+};
+
+/**
+ * PATCH /invoices/payById/:invoiceId
+ */
+export const payInvoiceById = async (req, res, next) => {
+  try {
+    const { invoiceId } = req.params;
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, status: true, visitId: true },
+    });
+
+    if (!invoice) return next(new AppError("Invoice not found", 404));
+    if (invoice.status === "PAID") return next(new AppError("Invoice is already PAID", 400));
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: { status: "PAID", paidAt: new Date() },
+        include: INVOICE_INCLUDE,
+      });
+
+      if (invoice.visitId) {
+        await tx.visit.update({
+          where: { id: invoice.visitId },
+          data: { status: "PAID" },
+        });
+      }
+
+      return result;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Invoice marked as PAID",
+      data: normalizeInvoice(updated),
     });
   } catch (error) {
     next(error);

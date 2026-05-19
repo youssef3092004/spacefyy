@@ -1,7 +1,7 @@
 [
   {
     "id": "b0000001-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000001-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-08T10:00:00.000Z",
@@ -11,7 +11,7 @@
   },
   {
     "id": "b0000002-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000002-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-10T14:30:00.000Z",
@@ -21,7 +21,7 @@
   },
   {
     "id": "b0000003-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000003-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-12T16:00:00.000Z",
@@ -31,7 +31,7 @@
   },
   {
     "id": "b0000004-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000004-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-15T11:00:00.000Z",
@@ -41,7 +41,7 @@
   },
   {
     "id": "b0000005-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000005-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-18T13:00:00.000Z",
@@ -51,7 +51,7 @@
   },
   {
     "id": "b0000006-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000006-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-20T15:00:00.000Z",
@@ -61,7 +61,7 @@
   },
   {
     "id": "b0000007-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000007-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-23T09:00:00.000Z",
@@ -71,7 +71,7 @@
   },
   {
     "id": "b0000008-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000008-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-26T12:00:00.000Z",
@@ -81,7 +81,7 @@
   },
   {
     "id": "b0000009-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000009-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-04-29T17:00:00.000Z",
@@ -91,7 +91,7 @@
   },
   {
     "id": "b000000a-0000-4000-8000-000000000000",
-    "branchId": "bce042f4-8f69-4468-bf1d-fb44b8f6b825",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c000000a-0000-4000-8000-000000000000",
     "status": "PAID",
     "startedAt": "2026-05-03T10:00:00.000Z",
@@ -99,226 +99,80 @@
     "durationMinutes": 90,
     "totalPrice": 120
   },
-
   {
-    "id": "f2000001-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000001-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-05T14:00:00.000Z",
-    "endedAt": "2026-04-05T15:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 120
-  },
-  {
-    "id": "f2000002-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000001-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-18T18:00:00.000Z",
-    "endedAt": "2026-04-18T19:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
-  },
-  {
-    "id": "f2000003-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000002-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-08T16:00:00.000Z",
-    "endedAt": "2026-04-08T17:15:00.000Z",
-    "durationMinutes": 75,
-    "totalPrice": 100
-  },
-  {
-    "id": "f2000004-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000004-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-10T18:00:00.000Z",
-    "endedAt": "2026-04-10T20:00:00.000Z",
-    "durationMinutes": 120,
-    "totalPrice": 160
-  },
-  {
-    "id": "f2000005-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000005-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-16T15:00:00.000Z",
-    "endedAt": "2026-04-16T16:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 120
-  },
-  {
-    "id": "f2000006-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000006-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-12T19:00:00.000Z",
-    "endedAt": "2026-04-12T20:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 150
-  },
-  {
-    "id": "f2000007-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000007-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-15T17:00:00.000Z",
-    "endedAt": "2026-04-15T17:45:00.000Z",
-    "durationMinutes": 45,
-    "totalPrice": 60
-  },
-  {
-    "id": "f2000008-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000008-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-17T14:00:00.000Z",
-    "endedAt": "2026-04-17T15:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
-  },
-  {
-    "id": "f2000009-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
+    "id": "b000000b-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "customerId": "c0000009-0000-4000-8000-000000000000",
     "status": "PAID",
-    "startedAt": "2026-04-20T16:00:00.000Z",
-    "endedAt": "2026-04-20T17:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 120
+    "startedAt": "2026-05-16T10:00:00.000Z",
+    "endedAt": "2026-05-16T11:00:00.000Z",
+    "durationMinutes": 60,
+    "totalPrice": 80,
+    "resourceType": "DEVICE",
+    "resourceId": "de00000b-0000-4000-8000-000000000000",
+    "priceType": "PER_HOUR",
+    "basePrice": 80,
+    "gamesCount": 1,
+    "unitPrice": 80,
+    "currency": "EGP",
+    "createdById": "34455667-8899-4cc0-ddee-ff0011334422",
+    "endedById": "34455667-8899-4cc0-ddee-ff0011334422"
   },
   {
-    "id": "f200000a-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000a-0000-4000-8000-000000000000",
+    "id": "b000000c-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
     "status": "PAID",
-    "startedAt": "2026-04-13T15:00:00.000Z",
-    "endedAt": "2026-04-13T17:00:00.000Z",
+    "startedAt": "2026-05-17T12:00:00.000Z",
+    "endedAt": "2026-05-17T13:30:00.000Z",
+    "durationMinutes": 90,
+    "totalPrice": 120,
+    "resourceType": "DEVICE",
+    "resourceId": "de00000c-0000-4000-8000-000000000000",
+    "priceType": "PER_HOUR",
+    "basePrice": 80,
+    "gamesCount": 1,
+    "unitPrice": 80,
+    "currency": "EGP",
+    "createdById": "34455667-8899-4cc0-ddee-ff0011334422",
+    "endedById": "34455667-8899-4cc0-ddee-ff0011334422"
+  },
+  {
+    "id": "b000000d-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "status": "PAID",
+    "startedAt": "2026-05-18T15:00:00.000Z",
+    "endedAt": "2026-05-18T17:00:00.000Z",
     "durationMinutes": 120,
-    "totalPrice": 200
+    "totalPrice": 160,
+    "resourceType": "DEVICE",
+    "resourceId": "de00000d-0000-4000-8000-000000000000",
+    "priceType": "PER_HOUR",
+    "basePrice": 80,
+    "gamesCount": 1,
+    "unitPrice": 80,
+    "currency": "EGP",
+    "createdById": "34455667-8899-4cc0-ddee-ff0011334422",
+    "endedById": "34455667-8899-4cc0-ddee-ff0011334422"
   },
   {
-    "id": "f200000b-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000a-0000-4000-8000-000000000000",
+    "id": "b000000e-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
     "status": "PAID",
-    "startedAt": "2026-04-26T17:00:00.000Z",
-    "endedAt": "2026-04-26T18:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 160
-  },
-  {
-    "id": "f200000c-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000c-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-22T13:00:00.000Z",
-    "endedAt": "2026-04-22T14:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
-  },
-  {
-    "id": "f200000d-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000d-0000-4000-8000-000000000000",
-    "status": "INVOICED",
-    "startedAt": "2026-04-24T20:00:00.000Z",
-    "endedAt": "2026-04-24T21:15:00.000Z",
-    "durationMinutes": 75,
-    "totalPrice": 120
-  },
-  {
-    "id": "f200000e-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000e-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-28T17:00:00.000Z",
-    "endedAt": "2026-04-28T18:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
-  },
-  {
-    "id": "f200000f-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000f-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-04-30T16:00:00.000Z",
-    "endedAt": "2026-04-30T16:45:00.000Z",
-    "durationMinutes": 45,
-    "totalPrice": 60
-  },
-
-  {
-    "id": "f2010001-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000001-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-02T14:00:00.000Z",
-    "endedAt": "2026-05-02T15:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 120
-  },
-  {
-    "id": "f2010002-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000002-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-04T16:00:00.000Z",
-    "endedAt": "2026-05-04T17:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
-  },
-  {
-    "id": "f2010003-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000004-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-05T18:00:00.000Z",
-    "endedAt": "2026-05-05T20:00:00.000Z",
-    "durationMinutes": 120,
-    "totalPrice": 160
-  },
-  {
-    "id": "f2010004-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c0000006-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-06T19:00:00.000Z",
-    "endedAt": "2026-05-06T20:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 150
-  },
-  {
-    "id": "f2010005-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000a-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-03T15:00:00.000Z",
-    "endedAt": "2026-05-03T17:00:00.000Z",
-    "durationMinutes": 120,
-    "totalPrice": 250
-  },
-  {
-    "id": "f2010006-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000d-0000-4000-8000-000000000000",
-    "status": "INVOICED",
-    "startedAt": "2026-05-07T20:00:00.000Z",
-    "endedAt": "2026-05-07T21:30:00.000Z",
-    "durationMinutes": 90,
-    "totalPrice": 180
-  },
-  {
-    "id": "f2010007-0000-4000-8000-000000000000",
-    "branchId": "f2cad986-cbea-4384-8322-559cd1726418",
-    "customerId": "c000000e-0000-4000-8000-000000000000",
-    "status": "PAID",
-    "startedAt": "2026-05-08T17:00:00.000Z",
-    "endedAt": "2026-05-08T18:00:00.000Z",
-    "durationMinutes": 60,
-    "totalPrice": 80
+    "startedAt": "2026-05-19T18:00:00.000Z",
+    "endedAt": "2026-05-19T20:30:00.000Z",
+    "durationMinutes": 150,
+    "totalPrice": 200,
+    "resourceType": "DEVICE",
+    "resourceId": "de00000e-0000-4000-8000-000000000000",
+    "priceType": "PER_HOUR",
+    "basePrice": 80,
+    "gamesCount": 1,
+    "unitPrice": 80,
+    "currency": "EGP",
+    "createdById": "34455667-8899-4cc0-ddee-ff0011334422",
+    "endedById": "34455667-8899-4cc0-ddee-ff0011334422"
   }
 ]

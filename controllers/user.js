@@ -115,6 +115,10 @@ export const deleteUserById = async (req, res, next) => {
       },
     });
 
+    await redisClient.del(`user:${id}`);
+    const listKeys = await redisClient.keys("users:*");
+    if (listKeys.length > 0) await redisClient.del(listKeys);
+
     res.status(200).json({
       status: "success",
       message: "User deleted successfully",
@@ -140,6 +144,10 @@ export const deleteAllUsers = async (req, res, next) => {
     if (result.count === 0) {
       return next(new AppError("No users to delete", 404));
     }
+
+    const allKeys = await redisClient.keys("user*");
+    if (allKeys.length > 0) await redisClient.del(allKeys);
+
     res.status(200).json({
       status: "success",
       message: "All users deleted successfully",

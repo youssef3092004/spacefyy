@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(npx prisma *)",
-      "Bash(node -e \"console.log\\(new Date\\(\\).toISOString\\(\\).replace\\(/[:.]/g, '-'\\).slice\\(0, 19\\)\\)\")"
+      "Bash(node -e \"console.log\\(new Date\\(\\).toISOString\\(\\).replace\\(/[:.]/g, '-'\\).slice\\(0, 19\\)\\)\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\Youssef\\\\spacefyy\" -Depth 2)",
+      "Bash(Select-Object FullName, Mode)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(npm install *)",
+      "Bash(./node_modules/.bin/prisma migrate *)",
+      "PowerShell(.\\\\node_modules\\\\.bin\\\\prisma migrate dev --name add_customer_discount_schedule 2>&1)",
+      "PowerShell(node node_modules/prisma/build/index.js migrate dev --name add_customer_discount_schedule 2>&1)",
+      "PowerShell(npm install fast-check 2>&1)",
+      "PowerShell(tail -5)",
+      "Bash(node node_modules/prisma/build/index.js migrate dev --name add_customer_discount_schedule)",
+      "Bash(node node_modules/prisma/build/index.js generate)"
     ]
   }
 }

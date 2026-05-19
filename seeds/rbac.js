@@ -72,11 +72,9 @@ const assignAllPermissionsToAllRoles = async (db) => {
 };
 
 const main = async () => {
-  await prisma.$transaction(async (tx) => {
-    await upsertRoles(tx);
-    await upsertPermissions(tx);
-    await assignAllPermissionsToAllRoles(tx);
-  });
+  await upsertRoles(prisma);
+  await upsertPermissions(prisma);
+  await assignAllPermissionsToAllRoles(prisma);
 
   console.log("RBAC seed completed successfully.");
 };

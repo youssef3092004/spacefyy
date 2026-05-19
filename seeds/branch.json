@@ -1,23 +1,10 @@
 [
   {
-    "id": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
+    "id": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "name": "Main Branch",
-    "address": "123 Main St",
-    "businessId": "33445566-7788-4901-cccc-ddddeeeeffffee",
-    "createdAt": "2025-02-26T10:00:00Z"
-  },
-  {
-    "id": "2b3c4d5e-6f7a-8b9c-0d1e-121314151617",
-    "name": "Secondary Branch",
-    "address": "456 Second Ave",
-    "businessId": "33445566-7788-4901-cccc-ddddeeeeffffee",
-    "createdAt": "2025-02-26T10:00:00Z"
-  },
-  {
-    "id": "3c4d5e6f-7a8b-9c0d-1e2f-131415161718",
-    "name": "Tertiary Branch",
-    "address": "789 Third Blvd",
-    "businessId": "44556677-8899-4012-dddd-eeeeffff0011",
-    "createdAt": "2025-02-26T10:00:00Z"
+    "address": "123 Gaming Street, Cairo, Egypt",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
+    "isActive": true,
+    "createdAt": "2025-01-15T10:00:00Z"
   }
 ]

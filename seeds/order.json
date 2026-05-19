@@ -1,0 +1,67 @@
+[
+  {
+    "id": "f0000001-0000-4000-8000-000000000000",
+    "visitId": "b000000b-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "number": 1,
+    "discountType": "FLAT",
+    "discountAmount": "0",
+    "customerDiscountType": "FLAT",
+    "customerDiscountAmount": "0",
+    "totalPrice": "40",
+    "finalPrice": "40"
+  },
+  {
+    "id": "f0000002-0000-4000-8000-000000000000",
+    "visitId": "b000000b-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "number": 2,
+    "discountType": "FLAT",
+    "discountAmount": "5",
+    "customerDiscountType": "FLAT",
+    "customerDiscountAmount": "0",
+    "totalPrice": "40",
+    "finalPrice": "35"
+  },
+  {
+    "id": "f0000003-0000-4000-8000-000000000000",
+    "visitId": "b000000c-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "number": 3,
+    "discountType": "FLAT",
+    "discountAmount": "0",
+    "customerDiscountType": "FLAT",
+    "customerDiscountAmount": "0",
+    "totalPrice": "120",
+    "finalPrice": "120"
+  },
+  {
+    "id": "f0000004-0000-4000-8000-000000000000",
+    "visitId": "b000000d-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "number": 4,
+    "discountType": "FLAT",
+    "discountAmount": "10",
+    "customerDiscountType": "FLAT",
+    "customerDiscountAmount": "0",
+    "totalPrice": "160",
+    "finalPrice": "150"
+  },
+  {
+    "id": "f0000005-0000-4000-8000-000000000000",
+    "visitId": "b000000e-0000-4000-8000-000000000000",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "customerId": "c0000009-0000-4000-8000-000000000000",
+    "number": 5,
+    "discountType": "FLAT",
+    "discountAmount": "20",
+    "customerDiscountType": "FLAT",
+    "customerDiscountAmount": "0",
+    "totalPrice": "200",
+    "finalPrice": "180"
+  }
+]

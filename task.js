@@ -1,6 +1,2 @@
-//todo fix create customer      Done
-//todo manual disscount not advanced    Done
-//todo make a optional to block this customer and dind't make any visits include session and orders or orders take away for him
-//todo fix order to create order wihtout visit
-
-//todo integrate history in getByCustomerId with all visits and orders and order take away
+// make a order instead of orders in the all endpoints related of customer
+/// when the cutomer make order i will take an orderItmes only and i will create order and add orderItems to it and he will give me a visit id when he give me an orderItems again i will not create again order i wil add orderITems to the order that mean i will have only one order for each visit and i will add orderItems to it until the customer finish his order and then i will make the order as completed and i will not allow him to add more orderItems to it

@@ -12,6 +12,7 @@ import {
   deleteCustomersByBusinessId,
   blockCustomer,
   unblockCustomer,
+  getCustomerAnalytics,
 } from "../controllers/customer.js";
 import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
@@ -46,7 +47,20 @@ router.get(
   "/getById/:customerId",
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
-  cacheMiddleware((req) => `customer:${req.params.customerId}`, "TTL_BY_ID"),
+  cacheMiddleware((req) => {
+    const q = req.query;
+    return [
+      `customer:${req.params.customerId}`,
+      `visitsPage=${q.visitsPage || 1}`,
+      `visitsLimit=${q.visitsLimit || 10}`,
+      `visitsSort=${q.visitsSort || "startedAt"}`,
+      `visitsOrder=${q.visitsOrder || "desc"}`,
+      `ordersPage=${q.ordersPage || 1}`,
+      `ordersLimit=${q.ordersLimit || 10}`,
+      `ordersSort=${q.ordersSort || "createdAt"}`,
+      `ordersOrder=${q.ordersOrder || "desc"}`,
+    ].join(":");
+  }, "TTL_BY_ID"),
   getCustomerById,
 );
 
@@ -81,6 +95,17 @@ router.get(
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
   getBranchMonthlyStats,
+);
+
+router.get(
+  "/:customerId/analytics",
+  verifyToken,
+  checkPermission("VIEW_CUSTOMER"),
+  cacheMiddleware(
+    (req) => `customer:analytics:${req.params.customerId}`,
+    "TTL_BY_ID",
+  ),
+  getCustomerAnalytics,
 );
 
 router.patch(

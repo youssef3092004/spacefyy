@@ -1,7 +1,7 @@
 [
   {
     "id": "c0000001-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 1,
     "name": "Ahmed Hassan",
     "phone": "01012345601",
@@ -9,12 +9,15 @@
     "tags": ["VIP", "Loyal"],
     "notes": "Prefers PS5 zone, usually books weekend evenings.",
     "birthday": "1990-03-15T00:00:00.000Z",
+    "hasDiscount": true,
+    "discountType": "PERCENTAGE",
+    "discountAmount": "10",
     "createdAt": "2026-04-01T09:00:00.000Z",
     "updatedAt": "2026-04-01T09:00:00.000Z"
   },
   {
     "id": "c0000002-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 2,
     "name": "Mohamed Ali",
     "phone": "01123456702",
@@ -27,7 +30,7 @@
   },
   {
     "id": "c0000003-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 3,
     "name": "Sara Ibrahim",
     "phone": "01234567803",
@@ -40,7 +43,7 @@
   },
   {
     "id": "c0000004-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 4,
     "name": "Youssef Khaled",
     "phone": "01012348904",
@@ -53,7 +56,7 @@
   },
   {
     "id": "c0000005-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 5,
     "name": "Nour Mahmoud",
     "phone": "01123459005",
@@ -66,7 +69,7 @@
   },
   {
     "id": "c0000006-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 6,
     "name": "Amr Sayed",
     "phone": "01234560006",
@@ -74,12 +77,15 @@
     "tags": ["VIP"],
     "notes": "Corporate account — billed monthly.",
     "birthday": "1988-09-12T00:00:00.000Z",
+    "hasDiscount": true,
+    "discountType": "FLAT",
+    "discountAmount": "50",
     "createdAt": "2026-04-03T10:00:00.000Z",
     "updatedAt": "2026-04-03T10:00:00.000Z"
   },
   {
     "id": "c0000007-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 7,
     "name": "Hana Mostafa",
     "phone": "01012341007",
@@ -92,20 +98,22 @@
   },
   {
     "id": "c0000008-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 8,
     "name": "Karim Omar",
     "phone": "01123452008",
     "email": "karim.omar@spacefyy.demo",
     "tags": ["Blacklisted"],
-    "notes": "Caused damage to equipment on 2026-03-20. Do not serve without manager approval.",
+    "notes": "Caused damage to equipment on 2026-03-20.",
     "birthday": "1993-12-25T00:00:00.000Z",
+    "isBlocked": true,
+    "blockedReason": "Equipment damage — do not serve without manager approval.",
     "createdAt": "2026-04-07T15:00:00.000Z",
     "updatedAt": "2026-04-07T15:00:00.000Z"
   },
   {
     "id": "c0000009-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 9,
     "name": "Mona Adel",
     "phone": "01234563009",
@@ -118,7 +126,7 @@
   },
   {
     "id": "c000000a-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 10,
     "name": "Omar Fares",
     "phone": "01012344010",
@@ -131,7 +139,7 @@
   },
   {
     "id": "c000000b-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 11,
     "name": "Laila Hassan",
     "phone": "01123455011",
@@ -144,7 +152,7 @@
   },
   {
     "id": "c000000c-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 12,
     "name": "Tarek Nasser",
     "phone": "01234566012",
@@ -157,7 +165,7 @@
   },
   {
     "id": "c000000d-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 13,
     "name": "Dina Samir",
     "phone": "01012347013",
@@ -170,7 +178,7 @@
   },
   {
     "id": "c000000e-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 14,
     "name": "Rania Fouad",
     "phone": "01123458014",
@@ -183,7 +191,7 @@
   },
   {
     "id": "c000000f-0000-4000-8000-000000000000",
-    "businessId": "4f4f62c1-c3a6-4df1-83f0-20b03712995d",
+    "businessId": "52dc10db-6d71-4ee5-b575-327a26877292",
     "seqNumber": 15,
     "name": "Bassem Adly",
     "phone": "01234569015",

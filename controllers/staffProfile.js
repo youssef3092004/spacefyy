@@ -413,6 +413,9 @@ export const deleteStaffProfileById = async (req, res, next) => {
       prisma.nationalId.delete({
         where: { id: nationalId.id },
       }),
+      prisma.payroll.deleteMany({
+        where: { staffProfileId: id },
+      }),
       prisma.staffProfile.delete({
         where: { id },
       }),
@@ -431,9 +434,10 @@ export const deleteAllStaffProfiles = async (req, res, next) => {
     if (req.user.roleName !== "DEVELOPER") {
       return next(new AppError(messages.FORBIDDEN.en, 403));
     }
-    const [nationalIdDeletions, staffProfileDeletions] =
+    const [nationalIdDeletions, , staffProfileDeletions] =
       await prisma.$transaction([
         prisma.nationalId.deleteMany({}),
+        prisma.payroll.deleteMany({}),
         prisma.staffProfile.deleteMany({}),
       ]);
     if (nationalIdDeletions.count === 0) {

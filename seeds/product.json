@@ -1,23 +1,56 @@
 [
   {
-    "id": "8899aabb-ccdd-4eff-0011-223344556677",
-    "branchId": "1a2b3c4d-5e6f-7a8b-9c0d-111213141516",
-    "name": "Game Pack",
-    "price": 5.0,
+    "id": "pd000001-0000-4000-8000-000000000001",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000001-0000-4000-8000-000000000001",
+    "name": "Pepsi",
+    "price": 25.00,
+    "quantity": 50,
     "isActive": true
   },
   {
-    "id": "99aabbcc-ddee-4f00-1122-334455667788",
-    "branchId": "2b3c4d5e-6f7a-8b9c-0d1e-121314151617",
-    "name": "Snack Combo",
-    "price": 3.5,
+    "id": "pd000002-0000-4000-8000-000000000002",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000001-0000-4000-8000-000000000001",
+    "name": "Water",
+    "price": 10.00,
+    "quantity": 100,
     "isActive": true
   },
   {
-    "id": "aabbccdd-eeff-4011-2233-445566778899",
-    "branchId": "3c4d5e6f-7a8b-9c0d-1e2f-131415161718",
-    "name": "Merch Item",
-    "price": 12.0,
-    "isActive": false
+    "id": "pd000003-0000-4000-8000-000000000003",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000001-0000-4000-8000-000000000001",
+    "name": "Chicken Sandwich",
+    "price": 65.00,
+    "quantity": 30,
+    "isActive": true
+  },
+  {
+    "id": "pd000004-0000-4000-8000-000000000004",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000002-0000-4000-8000-000000000002",
+    "name": "USB Controller",
+    "price": 350.00,
+    "quantity": 15,
+    "isActive": true
+  },
+  {
+    "id": "pd000005-0000-4000-8000-000000000005",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000002-0000-4000-8000-000000000002",
+    "name": "Gaming Headset",
+    "price": 450.00,
+    "quantity": 10,
+    "isActive": true
+  },
+  {
+    "id": "pd000006-0000-4000-8000-000000000006",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
+    "categoryId": "ca000003-0000-4000-8000-000000000003",
+    "name": "Spacefyy Mug",
+    "price": 120.00,
+    "quantity": 25,
+    "isActive": true
   }
 ]

@@ -13,6 +13,10 @@ export const cacheMiddleware = (keyBuilder, type) => {
         return next();
       }
 
+      if (!redisClient.isReady) {
+        return next();
+      }
+
       let cachedData = null;
       try {
         cachedData = await redisClient.get(key);

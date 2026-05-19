@@ -116,14 +116,56 @@ async function seedPermission(data) {
   }
 }
 
+async function seedCategoryProduct(data) {
+  for (const record of data) {
+    await prisma.categoryProduct.upsert({
+      where: { id: record.id },
+      update: {
+        name: record.name,
+      },
+      create: record,
+    });
+  }
+}
+
 async function seedPricingRule(data) {
   // Skip pricing rules for now - requires complex resource relationships
   console.log(`  ⚠️  Skipping pricing rules (complex relationships required)`);
 }
 
 async function seedProduct(data) {
-  // Skip products for now - requires category relationships
-  console.log(`  ⚠️  Skipping products (requires category setup)`);
+  for (const record of data) {
+    await prisma.product.upsert({
+      where: { id: record.id },
+      update: {
+        categoryId: record.categoryId,
+        branchId: record.branchId,
+        name: record.name,
+        description: record.description ?? null,
+        sku: record.sku ?? null,
+        price: parseFloat(record.price),
+        stock: Number.isFinite(Number(record.quantity))
+          ? Number(record.quantity)
+          : 0,
+        image: record.image ?? null,
+        isActive: record.isActive ?? true,
+      },
+      create: {
+        id: record.id,
+        categoryId: record.categoryId,
+        branchId: record.branchId,
+        name: record.name,
+        description: record.description ?? null,
+        sku: record.sku ?? null,
+        price: parseFloat(record.price),
+        stock: Number.isFinite(Number(record.quantity))
+          ? Number(record.quantity)
+          : 0,
+        image: record.image ?? null,
+        isActive: record.isActive ?? true,
+      },
+    });
+  }
 }
 
 async function seedCustomerBranch(data) {
@@ -136,14 +178,18 @@ async function seedCustomerBranch(data) {
         },
       },
       update: {
-        firstVisitAt: record.firstVisitAt ? new Date(record.firstVisitAt) : null,
+        firstVisitAt: record.firstVisitAt
+          ? new Date(record.firstVisitAt)
+          : null,
       },
       create: {
         id: record.id,
         customerId: record.customerId,
         branchId: record.branchId,
         registeredAt: new Date(record.registeredAt),
-        firstVisitAt: record.firstVisitAt ? new Date(record.firstVisitAt) : null,
+        firstVisitAt: record.firstVisitAt
+          ? new Date(record.firstVisitAt)
+          : null,
       },
     });
   }
@@ -234,6 +280,39 @@ async function seedVisit(data) {
   }
 }
 
+async function seedOrder(data) {
+  for (const record of data) {
+    await prisma.order.upsert({
+      where: { id: record.id },
+      update: {
+        visitId: record.visitId ?? null,
+        branchId: record.branchId ?? null,
+        customerId: record.customerId ?? null,
+        number: record.number ?? 1,
+        discountType: record.discountType ?? "FLAT",
+        discountAmount: parseFloat(record.discountAmount ?? 0),
+        customerDiscountType: record.customerDiscountType ?? "FLAT",
+        customerDiscountAmount: parseFloat(record.customerDiscountAmount ?? 0),
+        totalPrice: parseFloat(record.totalPrice ?? 0),
+        finalPrice: parseFloat(record.finalPrice ?? 0),
+      },
+      create: {
+        id: record.id,
+        visitId: record.visitId ?? null,
+        branchId: record.branchId ?? null,
+        customerId: record.customerId ?? null,
+        number: record.number ?? 1,
+        discountType: record.discountType ?? "FLAT",
+        discountAmount: parseFloat(record.discountAmount ?? 0),
+        customerDiscountType: record.customerDiscountType ?? "FLAT",
+        customerDiscountAmount: parseFloat(record.customerDiscountAmount ?? 0),
+        totalPrice: parseFloat(record.totalPrice ?? 0),
+        finalPrice: parseFloat(record.finalPrice ?? 0),
+      },
+    });
+  }
+}
+
 const seeders = {
   plan: seedPlan,
   business: seedBusiness,
@@ -241,10 +320,12 @@ const seeders = {
   customer: seedCustomer,
   customerBranch: seedCustomerBranch,
   businessBranch: () => {}, // Skip - duplicate of branch
+  categoryProduct: seedCategoryProduct,
   permission: seedPermission,
   permissions: seedPermission,
   pricingDemo: seedPricingRule,
   product: seedProduct,
+  order: seedOrder,
   session: seedSession,
   spaceSeed: seedSpace,
   usersWithAllRoles: seedUser,
@@ -266,8 +347,10 @@ async function main() {
       "customerBranch",
       "permission",
       "permissions",
+      "categoryProduct",
       "spaceSeed",
       "visitSession",
+      "order",
       "session",
       "pricingDemo",
       "product",
