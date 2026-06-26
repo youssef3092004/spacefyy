@@ -45,32 +45,21 @@ export const checkOwnership = ({
           : model === "business"
             ? { ownerId: true }
             : model === "session"
-              ? {
-                  id: true,
-                  branchId: true,
-                  visit: { select: { branchId: true } },
-                  createdById: true,
-                  deletedAt: true,
-                }
-              : model === "visit"
+              ? { id: true, branchId: true, createdById: true, deletedAt: true }
+              : model === "sessionComponent"
                 ? { id: true, branchId: true }
-                : scope === "user"
-                  ? { userId: true, branchId: true }
-                  : { branchId: true }; // device, space, unit, equipment, etc.
+                : model === "visit"
+                  ? { id: true, branchId: true }
+                  : scope === "user"
+                    ? { userId: true, branchId: true }
+                    : { branchId: true };
 
       // All standard models use "id" as primary key for findUnique
-      const whereField =
-        model === "branch" ||
-        model === "business" ||
-        model === "session" ||
-        model === "visit" ||
-        model === "device" ||
-        model === "space" ||
-        model === "unit" ||
-        model === "equipment" ||
-        model === "product"
-          ? "id"
-          : paramId;
+      const idModels = new Set([
+        "branch", "business", "session", "sessionComponent",
+        "visit", "device", "space", "unit", "equipment", "product", "categoryProduct",
+      ]);
+      const whereField = idModels.has(model) ? "id" : paramId;
 
       const resource =
         model === "session"

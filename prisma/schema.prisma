@@ -129,9 +129,7 @@ enum PlanType {
 
 enum VisitStatus {
   ACTIVE
-  CLOSED
   INVOICED
-  PAID
 }
 
 enum InvoiceStatus {
@@ -390,6 +388,7 @@ model Branch {
   sessions              Session[]
   pricingRules          PricingRule[]
   products              Product[]
+  categoryProducts      CategoryProduct[]
   monthlyStats          BranchMonthlyStats[]
   customerBranches      CustomerBranch[]
   orders                Order[]
@@ -578,13 +577,13 @@ model PricingRule {
   unitId      String?
   equipmentId String?
 
-  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  space     Space?     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  device    Device?    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  unit      Unit?      @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  equipment Equipment? @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-  visits    Visit[]
-  sessions  Session[]
+  branch     Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  space      Space?             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  device     Device?            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  unit       Unit?              @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  equipment  Equipment?         @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  visits     Visit[]
+  components SessionComponent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -768,15 +767,22 @@ model Visit {
 }
 
 model Invoice {
-  id          String        @id @default(uuid())
-  visitId     String?       @unique
-  orderId     String?       @unique
-  branchId    String?
-  totalAmount Decimal       @db.Decimal(12, 2)
-  status      InvoiceStatus @default(UNPAID)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  paidAt      DateTime?
+  id       String  @id @default(uuid())
+  visitId  String? @unique
+  orderId  String? @unique
+  branchId String?
+
+  totalAmount            Decimal @db.Decimal(12, 2)
+  discountType           String  @default("FLAT")
+  discountAmount         Decimal @default(0) @db.Decimal(10, 2)
+  customerDiscountType   String  @default("FLAT")
+  customerDiscountAmount Decimal @default(0) @db.Decimal(10, 2)
+  finalAmount            Decimal @default(0) @db.Decimal(12, 2)
+
+  status    InvoiceStatus @default(UNPAID)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  paidAt    DateTime?
 
   visit  Visit?  @relation(fields: [visitId], references: [id], onDelete: Cascade)
   order  Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -788,31 +794,18 @@ model Invoice {
 }
 
 model Session {
-  id String @id @default(uuid())
-
+  id        String  @id @default(uuid())
   branchId  String
   visitId   String
   bookingId String?
 
-  resourceType SessionResourceType
-  resourceId   String
-
-  pricingRuleId String?
-
-  priceType  PricingType @default(PER_HOUR)
-  basePrice  Decimal     @default(0) @db.Decimal(10, 2)
-  gamesCount Int         @default(1)
-
-  unitPrice  Decimal @db.Decimal(10, 2)
-  totalPrice Decimal @db.Decimal(10, 2)
-  currency   String  @default("EGP")
-
-  startedAt DateTime
-  endedAt   DateTime?
-
+  startedAt       DateTime
+  endedAt         DateTime?
   durationMinutes Int?
 
-  status SessionStatus @default(ACTIVE)
+  totalPrice Decimal       @default(0) @db.Decimal(10, 2)
+  currency   String        @default("EGP")
+  status     SessionStatus @default(ACTIVE)
 
   createdById  String
   endedById    String?
@@ -823,19 +816,18 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  visit       Visit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
-  createdBy   User         @relation("SessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  endedBy     User?        @relation("SessionEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
-  canceledBy  User?        @relation("SessionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
-  deletedBy   User?        @relation("SessionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  branch     Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  visit      Visit  @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  createdBy  User   @relation("SessionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  endedBy    User?  @relation("SessionEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
+  canceledBy User?  @relation("SessionCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+  deletedBy  User?  @relation("SessionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  components SessionComponent[]
 
   @@index([branchId])
   @@index([visitId])
-  @@index([resourceId])
   @@index([status])
-  @@index([pricingRuleId])
   @@index([bookingId])
   @@index([startedAt])
   @@index([createdById])
@@ -843,20 +835,58 @@ model Session {
   @@index([canceledById])
   @@index([deletedById])
   @@index([deletedAt])
-  @@index([resourceType, resourceId])
   @@index([branchId, status])
   @@index([branchId, status, deletedAt])
   @@index([visitId, branchId, deletedAt])
 }
 
-model CategoryProduct {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  products  Product[]
+model SessionComponent {
+  id        String @id @default(uuid())
+  sessionId String
+  branchId  String
 
-  @@index([createdAt])
+  resourceType SessionResourceType
+  resourceId   String
+
+  pricingRuleId String?
+
+  priceType  PricingType @default(PER_HOUR)
+  unitPrice  Decimal     @db.Decimal(10, 2)
+  quantity   Int         @default(0)
+  gamesCount Int         @default(0)
+
+  startedAt       DateTime
+  endedAt         DateTime?
+  durationMinutes Int?
+  totalPrice      Decimal   @default(0) @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([branchId])
+  @@index([resourceType, resourceId])
+  @@index([pricingRuleId])
+  @@index([sessionId, resourceType])
+  @@index([branchId, resourceType, resourceId])
+}
+
+model CategoryProduct {
+  id        String   @id @default(uuid())
+  branchId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([name, branchId])
+  @@index([branchId])
+  @@index([branchId, createdAt])
 }
 
 model Product {

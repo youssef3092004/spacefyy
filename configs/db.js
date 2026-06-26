@@ -23,7 +23,7 @@ const pool =
   globalForDb.pgPool ||
   new Pool({
     connectionString,
-    max: Number(process.env.DB_POOL_MAX || 10),
+    max: Number(process.env.DB_POOL_MAX || 5),
     idleTimeoutMillis: Number(process.env.DB_POOL_IDLE_TIMEOUT_MS || 10000),
     connectionTimeoutMillis: Number(
       process.env.DB_POOL_CONNECTION_TIMEOUT_MS || 5000,
@@ -39,11 +39,9 @@ const prisma =
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.pgPool = pool;
-  globalForDb.prismaAdapter = adapter;
-  globalForDb.prisma = prisma;
-}
+globalForDb.pgPool = pool;
+globalForDb.prismaAdapter = adapter;
+globalForDb.prisma = prisma;
 
 export async function connectDB() {
   try {

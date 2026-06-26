@@ -434,14 +434,26 @@ export const getCustomerById = async (req, res, next) => {
               where: { deletedAt: null },
               select: {
                 id: true,
-                resourceType: true,
-                resourceId: true,
-                priceType: true,
                 totalPrice: true,
                 startedAt: true,
                 endedAt: true,
                 durationMinutes: true,
                 status: true,
+                components: {
+                  select: {
+                    id: true,
+                    resourceType: true,
+                    resourceId: true,
+                    priceType: true,
+                    unitPrice: true,
+                    quantity: true,
+                    gamesCount: true,
+                    totalPrice: true,
+                    startedAt: true,
+                    endedAt: true,
+                    durationMinutes: true,
+                  },
+                },
               },
             },
             orders: {
@@ -1090,7 +1102,7 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
         where: {
           branchId,
           startedAt: { gte: startOfThisMonth },
-          status: { in: ["INVOICED", "PAID"] },
+          status: "INVOICED",
         },
         _sum: { totalPrice: true },
       }),
@@ -1098,7 +1110,7 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
         where: {
           branchId,
           startedAt: { gte: startOfLastMonth, lte: endOfLastMonth },
-          status: { in: ["INVOICED", "PAID"] },
+          status: "INVOICED",
         },
         _sum: { totalPrice: true },
       }),
@@ -1300,7 +1312,7 @@ export const getBranchMonthlyStats = async (req, res, next) => {
         where: {
           branchId,
           startedAt: { gte: startOfThisMonth },
-          status: { in: ["INVOICED", "PAID"] },
+          status: "INVOICED",
         },
         _sum: { totalPrice: true },
       }),

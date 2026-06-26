@@ -4,6 +4,7 @@ import { pagination } from "../utils/pagination.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
 import { incrementStorageUsage } from "../utils/storageUsage.js";
 import { redisClient } from "../configs/redis.js";
+import { invalidateSpaceCache } from "./spaceAvailability.js";
 
 const SpaceType = ["PRIVATE", "PUBLIC", "DESK", "MEETING", "VIP", "OTHER"];
 const PricingType = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
@@ -187,28 +188,19 @@ export const getSpaceById = async (req, res, next) => {
       return next(new AppError("Space not found", 404));
     }
 
-    // Fetch all sessions for analytics
+    // Fetch all sessions that used this space (via components)
     const allSessions = await prisma.session.findMany({
       where: {
-        resourceType: "SPACE",
-        resourceId: spaceId,
         deletedAt: null,
+        components: { some: { resourceType: "SPACE", resourceId: spaceId } },
       },
       select: {
         id: true,
-        visitId: true,
         startedAt: true,
         endedAt: true,
         durationMinutes: true,
         status: true,
-        priceType: true,
-        basePrice: true,
-        gamesCount: true,
-        unitPrice: true,
         totalPrice: true,
-        currency: true,
-        createdAt: true,
-        updatedAt: true,
       },
     });
 
@@ -243,7 +235,6 @@ export const getSpaceById = async (req, res, next) => {
         acc.cancelledSessions += session.status === "CANCELLED" ? 1 : 0;
         acc.totalDurationMinutes += sessionDurationMinutes;
         acc.totalRevenue += Number(session.totalPrice || 0);
-        acc.totalBaseRevenue += Number(session.basePrice || 0);
 
         return acc;
       },
@@ -254,7 +245,6 @@ export const getSpaceById = async (req, res, next) => {
         cancelledSessions: 0,
         totalDurationMinutes: 0,
         totalRevenue: 0,
-        totalBaseRevenue: 0,
       },
     );
 
@@ -278,7 +268,6 @@ export const getSpaceById = async (req, res, next) => {
           totalHoursSpent,
           averageSessionDurationMinutes,
           totalRevenue: Number(analytics.totalRevenue.toFixed(2)),
-          totalBaseRevenue: Number(analytics.totalBaseRevenue.toFixed(2)),
         },
       },
       source: "database",
@@ -682,7 +671,8 @@ export const updateSpaceById = async (req, res, next) => {
       data: updates,
     });
 
-    // Invalidate cache for this branch
+    // Invalidate all related caches for this branch (high-performance pattern)
+    await invalidateSpaceCache(branchId);
     const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
     if (keysToDelete.length > 0) {
       await redisClient.del(keysToDelete);
@@ -739,10 +729,6 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
       "endedAt",
       "durationMinutes",
       "status",
-      "priceType",
-      "basePrice",
-      "gamesCount",
-      "unitPrice",
       "totalPrice",
       "currency",
       "createdAt",
@@ -755,13 +741,11 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
 
     // 🔥 Dynamic filtering with date range
     const where = {
-      resourceType: "SPACE",
-      resourceId: spaceId,
       deletedAt: null,
+      components: { some: { resourceType: "SPACE", resourceId: spaceId } },
     };
 
     if (status) where.status = status;
-    if (priceType) where.priceType = priceType;
 
     // Add date range filtering on createdAt using pre-parsed dates from middleware
     if (req.parsedDates?.startDate || req.parsedDates?.endDate) {
@@ -784,14 +768,19 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
           endedAt: true,
           durationMinutes: true,
           status: true,
-          priceType: true,
-          basePrice: true,
-          gamesCount: true,
-          unitPrice: true,
           totalPrice: true,
           currency: true,
           createdAt: true,
           updatedAt: true,
+          components: {
+            where: { resourceType: "SPACE", resourceId: spaceId },
+            select: {
+              priceType: true,
+              unitPrice: true,
+              quantity: true,
+              totalPrice: true,
+            },
+          },
           visit: {
             select: {
               customer: {
@@ -823,12 +812,9 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
       endedAt: session.endedAt,
       durationMinutes: session.durationMinutes,
       status: session.status,
-      priceType: session.priceType,
-      basePrice: session.basePrice,
-      gamesCount: session.gamesCount,
-      unitPrice: session.unitPrice,
       totalPrice: session.totalPrice,
       currency: session.currency,
+      spaceComponent: session.components?.[0] ?? null,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       customer: {

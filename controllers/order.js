@@ -1,12 +1,12 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
-import { isDiscountActiveNow } from "../utils/discountUtils.js";
+import { applyDiscount, resolveCustomerDiscount } from "../utils/discountUtils.js";
 import { randomUUID } from "crypto";
 
 // ─── Prisma include shape ─────────────────────────────────────────────────────
 
-const ORDER_INCLUDE = {
+export const ORDER_INCLUDE = {
   orderItems: {
     orderBy: { createdAt: "asc" },
     select: {
@@ -19,6 +19,13 @@ const ORDER_INCLUDE = {
       },
     },
   },
+  customer: {
+    select: { id: true, name: true },
+  },
+};
+
+const ORDER_LIST_INCLUDE = {
+  _count: { select: { orderItems: true } },
 };
 
 const INVOICE_INCLUDE = {
@@ -32,12 +39,6 @@ const INVOICE_INCLUDE = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const applyDiscount = (price, type, amount) => {
-  if (!amount || amount <= 0) return price;
-  const raw = type === "PERCENT" ? price * (1 - amount / 100) : price - amount;
-  return Math.max(0, Math.round((raw + Number.EPSILON) * 100) / 100);
-};
 
 const applyBothDiscounts = (price, order) => {
   let result = applyDiscount(price, order.customerDiscountType, Number(order.customerDiscountAmount));
@@ -80,42 +81,6 @@ const enrichItems = async (items) => {
   return enriched;
 };
 
-const resolveCustomerDiscount = async (customerId) => {
-  if (!customerId) return { type: "FLAT", amount: 0 };
-
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
-    select: {
-      isBlocked: true,
-      blockedReason: true,
-      hasDiscount: true,
-      discountType: true,
-      discountAmount: true,
-      discountStartsAt: true,
-      discountEndsAt: true,
-      discountStartTime: true,
-      discountEndTime: true,
-    },
-  });
-
-  if (!customer) return { type: "FLAT", amount: 0 };
-
-  if (customer.isBlocked) {
-    throw new AppError(
-      `Customer is blocked${customer.blockedReason ? `: ${customer.blockedReason}` : ""}`,
-      403,
-    );
-  }
-
-  if (isDiscountActiveNow(customer)) {
-    return {
-      type: customer.discountType,
-      amount: Number(customer.discountAmount),
-    };
-  }
-
-  return { type: "FLAT", amount: 0 };
-};
 
 const formatOrderItem = (item) => ({
   id: item.id,
@@ -132,13 +97,15 @@ const formatOrderItem = (item) => ({
     : null,
 });
 
-const formatOrder = (order) => ({
+export const formatOrder = (order) => ({
   id: order.id,
   number: order.number,
   isTakeaway: order.visitId === null,
   visitId: order.visitId ?? null,
   branchId: order.branchId ?? null,
-  customerId: order.customerId ?? null,
+  customer: order.customer
+    ? { id: order.customer.id, name: order.customer.name }
+    : null,
   status: order.status,
   discount: {
     order: {
@@ -150,12 +117,44 @@ const formatOrder = (order) => ({
       amount: Number(order.customerDiscountAmount),
     },
   },
+  hasDiscount: {
+    order: Number(order.discountAmount) > 0,
+    customer: Number(order.customerDiscountAmount) > 0,
+  },
   totalPrice: Number(order.totalPrice),
   finalPrice: Number(order.finalPrice),
   itemCount: Array.isArray(order.orderItems) ? order.orderItems.length : 0,
   orderItems: Array.isArray(order.orderItems)
     ? order.orderItems.map(formatOrderItem)
     : [],
+  createdAt: order.createdAt,
+  updatedAt: order.updatedAt,
+});
+
+const formatOrderSummary = (order) => ({
+  id: order.id,
+  number: order.number,
+  isTakeaway: order.visitId === null,
+  visitId: order.visitId ?? null,
+  branchId: order.branchId ?? null,
+  status: order.status,
+  discount: {
+    order: {
+      type: order.discountType,
+      amount: Number(order.discountAmount),
+    },
+    customer: {
+      type: order.customerDiscountType,
+      amount: Number(order.customerDiscountAmount),
+    },
+  },
+  hasDiscount: {
+    order: Number(order.discountAmount) > 0,
+    customer: Number(order.customerDiscountAmount) > 0,
+  },
+  totalPrice: Number(order.totalPrice),
+  finalPrice: Number(order.finalPrice),
+  itemCount: order._count?.orderItems ?? 0,
   createdAt: order.createdAt,
   updatedAt: order.updatedAt,
 });
@@ -292,12 +291,14 @@ export const addOrderItems = async (req, res, next) => {
     }
 
     // ── Discount resolution ───────────────────────────────────────────────────
-    // Customer discount is always resolved from profile.
-    // Order discount is a manual per-order addition on top.
-    const customerDiscount = await resolveCustomerDiscount(resolvedCustomerId);
+    // Visit orders: no discount at order level — discount is applied once at invoice level.
+    // Takeaway orders: apply customer discount + optional manual discount here.
+    const customerDiscount = isTakeaway
+      ? await resolveCustomerDiscount(resolvedCustomerId)
+      : { type: "FLAT", amount: 0 };
 
     let orderDiscount = { type: "FLAT", amount: 0 };
-    if (bodyDiscountType && bodyDiscountAmount !== undefined) {
+    if (isTakeaway && bodyDiscountType && bodyDiscountAmount !== undefined) {
       if (!["FLAT", "PERCENT"].includes(bodyDiscountType)) {
         return next(new AppError("discountType must be FLAT or PERCENT", 400));
       }
@@ -660,11 +661,19 @@ export const getOrderById = async (req, res, next) => {
 export const getAllOrders = async (req, res, next) => {
   try {
     const { page, limit, skip, sort, order } = pagination(req);
-    const { visitId, branchId } = req.query ?? {};
+    const { visitId, branchId, filter, search } = req.query ?? {};
 
     const where = {};
     if (visitId?.trim()) where.visitId = visitId.trim();
     if (branchId?.trim()) where.branchId = branchId.trim();
+
+    if (filter === "true") where.visitId = null;
+    else if (filter === "false") where.visitId = { not: null };
+
+    if (search?.trim()) {
+      const num = parseInt(search.trim(), 10);
+      if (!isNaN(num)) where.number = num;
+    }
 
     const [orders, total] = await Promise.all([
       prisma.order.findMany({

@@ -5,8 +5,7 @@ import { checkOwnership } from "../middleware/checkOwnership.js";
 import {
   closeVisit,
   getAllByBranchId,
-  invoiceVisit,
-  payVisit,
+  getVisitById,
   startVisit,
 } from "../controllers/visit.js";
 
@@ -26,26 +25,19 @@ router.get(
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   getAllByBranchId,
 );
+router.get(
+  "/getById/:visitId",
+  verifyToken,
+  checkPermission("VIEW-VISITS"),
+  checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  getVisitById,
+);
 router.patch(
   "/close/:visitId",
   verifyToken,
   checkPermission("UPDATE-VISITS"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
   closeVisit,
-);
-router.patch(
-  "/invoice/:visitId",
-  verifyToken,
-  checkPermission("UPDATE-VISITS"),
-  checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
-  invoiceVisit,
-);
-router.patch(
-  "/pay/:visitId",
-  verifyToken,
-  checkPermission("UPDATE-VISITS"),
-  checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
-  payVisit,
 );
 
 export default router;

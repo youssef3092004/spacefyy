@@ -197,6 +197,7 @@ async function seedCustomerBranch(data) {
 
 async function seedSession(data) {
   for (const record of data) {
+    // Upsert the session itself (Session model doesn't store resourceType/resourceId)
     await prisma.session.upsert({
       where: { id: record.id },
       update: {
@@ -204,30 +205,60 @@ async function seedSession(data) {
         endedAt: record.endedAt ? new Date(record.endedAt) : null,
         endedById: record.endedById ?? null,
         durationMinutes: record.durationMinutes ?? null,
-        totalPrice: parseFloat(record.totalPrice),
+        totalPrice: parseFloat(record.totalPrice || 0),
       },
       create: {
         id: record.id,
         branchId: record.branchId,
         visitId: record.visitId,
-        resourceType: record.resourceType,
-        resourceId: record.resourceId,
-        pricingRuleId: record.pricingRuleId ?? null,
-        priceType: record.priceType || "PER_HOUR",
-        basePrice: parseFloat(record.basePrice ?? 0),
-        gamesCount: record.gamesCount ?? 1,
-        unitPrice: parseFloat(record.unitPrice),
-        totalPrice: parseFloat(record.totalPrice),
-        currency: record.currency || "EGP",
         startedAt: new Date(record.startedAt),
         endedAt: record.endedAt ? new Date(record.endedAt) : null,
         durationMinutes: record.durationMinutes ?? null,
+        totalPrice: parseFloat(record.totalPrice || 0),
+        currency: record.currency || "EGP",
         status: record.status,
         createdById: record.createdById,
         endedById: record.endedById ?? null,
         canceledById: record.canceledById ?? null,
       },
     });
+
+    // If the seed record includes resource-specific fields, create a SessionComponent
+    if (record.resourceType && record.resourceId) {
+      const compId = record.componentId || `${record.id}-component`;
+      await prisma.sessionComponent.upsert({
+        where: { id: compId },
+        update: {
+          branchId: record.branchId,
+          resourceType: record.resourceType,
+          resourceId: record.resourceId,
+          pricingRuleId: record.pricingRuleId ?? null,
+          priceType: record.priceType || "PER_HOUR",
+          unitPrice: parseFloat(record.unitPrice ?? record.basePrice ?? 0),
+          gamesCount: record.gamesCount ?? 1,
+          startedAt: new Date(record.startedAt),
+          endedAt: record.endedAt ? new Date(record.endedAt) : null,
+          durationMinutes: record.durationMinutes ?? null,
+          totalPrice: parseFloat(record.totalPrice ?? 0),
+        },
+        create: {
+          id: compId,
+          sessionId: record.id,
+          branchId: record.branchId,
+          resourceType: record.resourceType,
+          resourceId: record.resourceId,
+          pricingRuleId: record.pricingRuleId ?? null,
+          priceType: record.priceType || "PER_HOUR",
+          unitPrice: parseFloat(record.unitPrice ?? record.basePrice ?? 0),
+          quantity: 1,
+          gamesCount: record.gamesCount ?? 1,
+          startedAt: new Date(record.startedAt),
+          endedAt: record.endedAt ? new Date(record.endedAt) : null,
+          durationMinutes: record.durationMinutes ?? null,
+          totalPrice: parseFloat(record.totalPrice ?? 0),
+        },
+      });
+    }
   }
 }
 
@@ -254,10 +285,19 @@ async function seedUser(data) {
 
 async function seedVisit(data) {
   for (const record of data) {
+    // Map legacy/status variations to Prisma VisitStatus enum values
+    const mapStatus = (s) => {
+      if (!s) return s;
+      if (s === "PAID") return "INVOICED"; // legacy value -> INVOICED
+      return s;
+    };
+
+    const mappedStatus = mapStatus(record.status);
+
     await prisma.visit.upsert({
       where: { id: record.id },
       update: {
-        status: record.status,
+        status: mappedStatus,
         endedAt: record.endedAt ? new Date(record.endedAt) : null,
         durationMinutes: record.durationMinutes ?? null,
         totalPrice:
@@ -267,7 +307,7 @@ async function seedVisit(data) {
         id: record.id,
         branchId: record.branchId,
         customerId: record.customerId,
-        status: record.status,
+        status: mappedStatus,
         startedAt: new Date(record.startedAt),
         endedAt: record.endedAt ? new Date(record.endedAt) : null,
         durationMinutes: record.durationMinutes ?? null,

@@ -7,6 +7,7 @@ import {
 } from "../utils/storageUsage.js";
 import { redisClient } from "../configs/redis.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
+import { invalidateSpaceCache } from "./spaceAvailability.js";
 
 const DeviceType = [
   "PC",
@@ -469,7 +470,8 @@ export const updateDeviceById = async (req, res, next) => {
       data: updates,
     });
 
-    // Invalidate cache - delete individual device key and all branch device lists
+    // Invalidate all caches related to this device's branch and space
+    await invalidateSpaceCache(existingDevice.branchId);
     const keysToDelete = await redisClient.keys(
       `devices:branchId=${existingDevice.branchId}*`,
     );

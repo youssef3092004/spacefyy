@@ -10,14 +10,11 @@ const SESSION_STATUS_TRANSITIONS = {
   CANCELLED: [],
 };
 
-const TIME_BASED_MODES = ["PER_HOUR", "TIME_RANGE"];
-
 const DEFAULT_PAGE_LIMIT = 10;
 const MAX_PAGE_LIMIT = 100;
 
-export const roundMoney = (value) => {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-};
+export const roundMoney = (value) =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 export const normalizeSessionResourceType = (resourceType) => {
   const normalized = String(resourceType || "").toUpperCase();
@@ -28,15 +25,11 @@ export const normalizeSessionResourceType = (resourceType) => {
 };
 
 export const normalizeSessionStatus = (status, fallback = null) => {
-  if (status === undefined || status === null || status === "") {
-    return fallback;
-  }
-
+  if (status === undefined || status === null || status === "") return fallback;
   const normalized = String(status).toUpperCase();
   if (!SessionStatus.includes(normalized)) {
     throw new AppError("Invalid session status", 400);
   }
-
   return normalized;
 };
 
@@ -45,17 +38,13 @@ export const normalizeSessionPriceType = (priceType, fallback = "PER_HOUR") => {
   if (!SessionPriceType.includes(normalized)) {
     throw new AppError("Invalid priceType", 400);
   }
-
   return normalized;
 };
 
 export const ensureSessionStatusTransition = (currentStatus, nextStatus) => {
-  if (!nextStatus || !currentStatus || nextStatus === currentStatus) {
-    return;
-  }
-
-  const allowedTransitions = SESSION_STATUS_TRANSITIONS[currentStatus] || [];
-  if (!allowedTransitions.includes(nextStatus)) {
+  if (!nextStatus || !currentStatus || nextStatus === currentStatus) return;
+  const allowed = SESSION_STATUS_TRANSITIONS[currentStatus] || [];
+  if (!allowed.includes(nextStatus)) {
     throw new AppError(
       `Cannot change session status from ${currentStatus} to ${nextStatus}`,
       400,
@@ -64,16 +53,12 @@ export const ensureSessionStatusTransition = (currentStatus, nextStatus) => {
 };
 
 export const parseDate = (value, fieldName) => {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-
-  const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
     throw new AppError(`${fieldName} must be a valid date`, 400);
   }
-
-  return parsedDate;
+  return parsed;
 };
 
 export const parseMoney = (value, fieldName) => {
@@ -84,101 +69,62 @@ export const parseMoney = (value, fieldName) => {
   if (parsed < 0) {
     throw new AppError(`${fieldName} must be >= 0`, 400);
   }
-
   return roundMoney(parsed);
 };
 
 export const calculateDurationMinutes = (startedAt, endedAt) => {
   const start = new Date(startedAt);
   const end = new Date(endedAt);
-
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     throw new AppError("Invalid session timestamps", 400);
   }
-
   if (end < start) {
     throw new AppError("endedAt cannot be before startedAt", 400);
   }
-
   return Math.ceil((end.getTime() - start.getTime()) / 60000);
 };
 
-export const calculateSessionTotal = ({
-  pricingMode,
-  unitPrice,
-  startedAt,
-  endedAt,
-  fallbackTotalPrice,
-}) => {
-  const price = parseMoney(unitPrice, "unitPrice");
-
-  if (!pricingMode || !TIME_BASED_MODES.includes(pricingMode)) {
-    if (fallbackTotalPrice !== undefined && fallbackTotalPrice !== null) {
-      return parseMoney(fallbackTotalPrice, "totalPrice");
-    }
-    return price;
-  }
-
-  if (!endedAt) {
-    if (fallbackTotalPrice !== undefined && fallbackTotalPrice !== null) {
-      return parseMoney(fallbackTotalPrice, "totalPrice");
-    }
-    return price;
-  }
-
-  const durationMinutes = calculateDurationMinutes(startedAt, endedAt);
-  return roundMoney((price * durationMinutes) / 60);
-};
-
-export const calculatePriceByType = ({
+// Core pricing formula for a single session component.
+// quantity handles multi-unit resources (e.g. 2 controllers).
+export const calculateComponentPrice = ({
   priceType,
-  amount,
+  unitPrice,
+  quantity = 1,
+  gamesCount = 0,
   startedAt,
   endedAt,
-  gamesCount = 1,
 }) => {
-  const normalizedType = normalizeSessionPriceType(priceType);
-  const baseAmount = parseMoney(amount, "amount");
-  const parsedGamesCount = Number(gamesCount ?? 1);
+  const type = normalizeSessionPriceType(priceType);
+  const price = parseMoney(unitPrice, "unitPrice");
+  const qty = Math.max(1, Number(quantity) || 1);
 
-  if (normalizedType === "PER_GAME") {
-    if (!Number.isInteger(parsedGamesCount) || parsedGamesCount <= 0) {
-      throw new AppError("gamesCount must be a positive integer", 400);
+  if (type === "PER_GAME") {
+    const games = Number(gamesCount);
+    if (!Number.isInteger(games) || games < 1) {
+      throw new AppError("gamesCount must be a positive integer for PER_GAME pricing", 400);
     }
-
-    return roundMoney(baseAmount * parsedGamesCount);
+    return roundMoney(price * qty * games);
   }
 
-  if (normalizedType !== "PER_HOUR") {
-    return baseAmount;
+  if (type === "PER_SESSION") {
+    return roundMoney(price * qty);
   }
 
-  if (!endedAt) {
-    return baseAmount;
-  }
+  // PER_HOUR — return basePrice as placeholder when session is still active
+  if (!endedAt) return roundMoney(price * qty);
 
   const durationMinutes = calculateDurationMinutes(startedAt, endedAt);
-  return roundMoney((baseAmount * durationMinutes) / 60);
+  return roundMoney((price * qty * durationMinutes) / 60);
 };
 
 export const getSessionQueryOptions = (query = {}) => {
   const page = Math.max(Number(query.page) || 1, 1);
-  const limit = Math.min(
-    Math.max(Number(query.limit) || DEFAULT_PAGE_LIMIT, 1),
-    MAX_PAGE_LIMIT,
-  );
+  const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_PAGE_LIMIT, 1), MAX_PAGE_LIMIT);
   const skip = (page - 1) * limit;
 
   const allowedSortFields = [
-    "createdAt",
-    "updatedAt",
-    "startedAt",
-    "endedAt",
-    "totalPrice",
-    "unitPrice",
-    "gamesCount",
-    "durationMinutes",
-    "status",
+    "createdAt", "updatedAt", "startedAt", "endedAt",
+    "totalPrice", "durationMinutes", "status",
   ];
 
   const sort = query.sort || "createdAt";
@@ -191,69 +137,22 @@ export const getSessionQueryOptions = (query = {}) => {
     throw new AppError("Invalid order, must be 'asc' or 'desc'", 400);
   }
 
-  const where = {
-    deletedAt: null,
-  };
+  const where = { deletedAt: null };
 
-  if (query.branchId) {
-    where.branchId = query.branchId;
-  }
-
-  if (query.visitId) {
-    where.visitId = query.visitId;
-  }
-
-  if (query.pricingRuleId) {
-    where.pricingRuleId = query.pricingRuleId;
-  }
-
-  if (query.bookingId) {
-    where.bookingId = query.bookingId;
-  }
-
-  if (query.resourceId) {
-    where.resourceId = query.resourceId;
-  }
-
-  if (query.resourceType) {
-    where.resourceType = normalizeSessionResourceType(query.resourceType);
-  }
-
-  if (query.status) {
-    where.status = normalizeSessionStatus(query.status);
-  }
+  if (query.branchId)      where.branchId      = query.branchId;
+  if (query.visitId)       where.visitId        = query.visitId;
+  if (query.bookingId)     where.bookingId      = query.bookingId;
+  if (query.status)        where.status         = normalizeSessionStatus(query.status);
 
   const startedFrom = parseDate(query.startedFrom, "startedFrom");
-  const startedTo = parseDate(query.startedTo, "startedTo");
+  const startedTo   = parseDate(query.startedTo,   "startedTo");
 
   if (startedFrom || startedTo) {
     where.startedAt = {
       ...(startedFrom ? { gte: startedFrom } : {}),
-      ...(startedTo ? { lte: startedTo } : {}),
+      ...(startedTo   ? { lte: startedTo   } : {}),
     };
   }
 
-  return {
-    page,
-    limit,
-    skip,
-    sort,
-    order,
-    where,
-  };
-};
-
-// BUG-FIX-4: Currency validation to ensure all prices use same currency
-export const validateCurrencyConsistency = (components, currency = "EGP") => {
-  if (!currency) {
-    throw new AppError("Currency is required for validation", 400);
-  }
-
-  // Currency validation primarily at aggregation level
-  // Components should all use the same currency from pricing rules
-  if (!components || components.length === 0) {
-    return true;
-  }
-
-  return true; // All components assumed same currency from pricing rule
+  return { page, limit, skip, sort, order, where };
 };

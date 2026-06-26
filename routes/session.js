@@ -7,6 +7,7 @@ import {
   createSession,
   deleteSessionById,
   endSession,
+  getAllSessionByVisitId,
   getAllSessionsByBranchId,
   getSessionById,
   updateSessionById,
@@ -22,6 +23,7 @@ router.post(
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
   createSession,
 );
+
 router.get(
   "/getAll/:branchId",
   verifyToken,
@@ -29,13 +31,12 @@ router.get(
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
   cacheMiddleware(
     (req) =>
-      `sessions:branchId=${req.params.branchId}:page=${req.query.page || 1}:limit=${req.query.limit || 10}:sort=${
-        req.query.sort || "createdAt"
-      }:order=${req.query.order || "desc"}`,
+      `sessions:branchId=${req.params.branchId}:page=${req.query.page || 1}:limit=${req.query.limit || 10}:sort=${req.query.sort || "createdAt"}:order=${req.query.order || "desc"}`,
     "TTL_LIST",
   ),
   getAllSessionsByBranchId,
 );
+
 router.get(
   "/getById/:sessionId",
   verifyToken,
@@ -44,6 +45,15 @@ router.get(
   cacheMiddleware((req) => `session:${req.params.sessionId}`, "TTL_BY_ID"),
   getSessionById,
 );
+
+router.get(
+  "/visit/:branchId/:visitId",
+  verifyToken,
+  checkPermission("VIEW-SESSIONS"),
+  checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  getAllSessionByVisitId,
+);
+
 router.patch(
   "/update/:sessionId",
   verifyToken,
@@ -51,6 +61,7 @@ router.patch(
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
   updateSessionById,
 );
+
 router.patch(
   "/end/:sessionId",
   verifyToken,
@@ -58,6 +69,7 @@ router.patch(
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
   endSession,
 );
+
 router.patch(
   "/cancel/:sessionId",
   verifyToken,
@@ -65,6 +77,7 @@ router.patch(
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
   cancelSession,
 );
+
 router.delete(
   "/delete/:sessionId",
   verifyToken,

@@ -13,7 +13,11 @@
       "PowerShell(npm install fast-check 2>&1)",
       "PowerShell(tail -5)",
       "Bash(node node_modules/prisma/build/index.js migrate dev --name add_customer_discount_schedule)",
-      "Bash(node node_modules/prisma/build/index.js generate)"
+      "Bash(node node_modules/prisma/build/index.js generate)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\routes\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\controllers\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\middleware\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\utils\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)"
     ]
   }
 }

@@ -11,6 +11,12 @@ import {
   deleteAllSpaces,
   deleteSpacesByBranchId,
 } from "../controllers/space.js";
+import { getSpacesOverview } from "../controllers/spaceOverview.js";
+import {
+  checkSpaceAvailability,
+  checkDeviceAvailability,
+  checkUnitAvailability,
+} from "../controllers/spaceAvailability.js";
 import { AppError } from "../utils/appError.js";
 import { verifyToken } from "../middleware/auth.js";
 import { cacheMiddleware } from "../middleware/cache.js";
@@ -65,6 +71,34 @@ router.post(
   checkPermission("CREATE-SPACES", true),
   createSpace,
 );
+router.get(
+  "/overview/:branchId",
+  verifyToken,
+  checkPermission("VIEW-SPACES", true),
+  checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  getSpacesOverview,
+);
+
+// Real-time availability endpoints (NO CACHE for accuracy)
+router.get(
+  "/:spaceId/availability",
+  verifyToken,
+  checkPermission("VIEW-SPACES", true),
+  checkSpaceAvailability,
+);
+router.get(
+  "/device/:deviceId/availability",
+  verifyToken,
+  checkPermission("VIEW-DEVICES", true),
+  checkDeviceAvailability,
+);
+router.get(
+  "/unit/:unitId/availability",
+  verifyToken,
+  checkPermission("VIEW-UNITS", true),
+  checkUnitAvailability,
+);
+
 router.get(
   "/getAllByBranchId/:branchId",
   verifyToken,

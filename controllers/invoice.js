@@ -2,37 +2,9 @@ import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
 
-const toNumber = (value) => {
-  if (value === null || value === undefined) return 0;
-  return Number(value);
-};
+const toNumber = (v) => (v === null || v === undefined ? 0 : Number(v));
 
-const normalizeInvoice = (invoice) => {
-  if (!invoice) return invoice;
-
-  return {
-    ...invoice,
-    totalAmount: toNumber(invoice.totalAmount),
-  };
-};
-
-const ensureVisitExists = async (visitId) => {
-  const visit = await prisma.visit.findUnique({
-    where: { id: visitId },
-    select: {
-      id: true,
-      branchId: true,
-      status: true,
-      totalPrice: true,
-    },
-  });
-
-  if (!visit) {
-    throw new AppError("Visit not found", 404);
-  }
-
-  return visit;
-};
+// ─── Shapes ───────────────────────────────────────────────────────────────────
 
 const INVOICE_INCLUDE = {
   visit: {
@@ -52,10 +24,35 @@ const INVOICE_INCLUDE = {
       number: true,
       branchId: true,
       status: true,
+      totalPrice: true,
       finalPrice: true,
       createdAt: true,
     },
   },
+};
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
+const normalizeInvoice = (invoice) => {
+  if (!invoice) return invoice;
+  return {
+    ...invoice,
+    totalAmount:            toNumber(invoice.totalAmount),
+    discountAmount:         toNumber(invoice.discountAmount),
+    customerDiscountAmount: toNumber(invoice.customerDiscountAmount),
+    finalAmount:            toNumber(invoice.finalAmount),
+  };
+};
+
+// ─── Guards ───────────────────────────────────────────────────────────────────
+
+const ensureVisitExists = async (visitId) => {
+  const visit = await prisma.visit.findUnique({
+    where: { id: visitId },
+    select: { id: true, branchId: true, status: true, totalPrice: true },
+  });
+  if (!visit) throw new AppError("Visit not found", 404);
+  return visit;
 };
 
 const ensureInvoiceExists = async (invoiceId) => {
@@ -63,55 +60,18 @@ const ensureInvoiceExists = async (invoiceId) => {
     where: { id: invoiceId },
     include: INVOICE_INCLUDE,
   });
-
-  if (!invoice) {
-    throw new AppError("Invoice not found", 404);
-  }
-
+  if (!invoice) throw new AppError("Invoice not found", 404);
   return invoice;
 };
 
-const VALID_INVOICE_STATUSES = new Set(["UNPAID", "PAID"]);
+const VALID_STATUSES = new Set(["UNPAID", "PAID"]);
 
-const calculateInvoiceTotal = async (visitId, tx = prisma) => {
-  const [visit, orderAgg] = await Promise.all([
-    tx.visit.findUnique({
-      where: { id: visitId },
-      select: {
-        totalPrice: true,
-      },
-    }),
-    tx.order.aggregate({
-      where: { visitId },
-      _sum: {
-        totalPrice: true,
-      },
-    }),
-  ]);
+// ─── Controllers ──────────────────────────────────────────────────────────────
 
-  if (!visit) {
-    throw new AppError("Visit not found", 404);
-  }
-
-  // Prefer visit.totalPrice because visit closing logic already computes the final bill.
-  const visitTotal = toNumber(visit.totalPrice);
-  const orderTotal = toNumber(orderAgg._sum.totalPrice);
-  const resolvedTotal = visitTotal > 0 ? visitTotal : orderTotal;
-
-  return Math.round((resolvedTotal + Number.EPSILON) * 100) / 100;
-};
-
-/**
- * POST /invoices/create
- * Body: { visitId }
- */
 export const createInvoice = async (req, res, next) => {
   try {
     const { visitId } = req.params;
-
-    if (!visitId) {
-      return next(new AppError("visitId is required", 400));
-    }
+    if (!visitId) return next(new AppError("visitId is required", 400));
 
     const visit = await ensureVisitExists(visitId);
 
@@ -119,46 +79,27 @@ export const createInvoice = async (req, res, next) => {
       return next(new AppError("Cannot invoice an ACTIVE visit", 400));
     }
 
-    if (visit.status === "PAID") {
-      return next(
-        new AppError("Cannot create an invoice for a PAID visit", 400),
-      );
-    }
-
-    if (visit.status === "CANCELLED") {
-      return next(
-        new AppError("Cannot create an invoice for a CANCELLED visit", 400),
-      );
-    }
-
     const existing = await prisma.invoice.findUnique({
       where: { visitId },
       select: { id: true },
     });
-
-    if (existing) {
-      return next(new AppError("Invoice already exists for this visit", 409));
-    }
+    if (existing) return next(new AppError("Invoice already exists for this visit", 409));
 
     const createdInvoice = await prisma.$transaction(async (tx) => {
-      const totalAmount = await calculateInvoiceTotal(visitId, tx);
+      const totalAmount = toNumber(visit.totalPrice);
 
       const invoice = await tx.invoice.create({
         data: {
           visitId,
           branchId: visit.branchId,
           totalAmount,
+          finalAmount: totalAmount,
           status: "UNPAID",
         },
         include: INVOICE_INCLUDE,
       });
 
-      await tx.visit.update({
-        where: { id: visitId },
-        data: {
-          status: "INVOICED",
-        },
-      });
+      await tx.visit.update({ where: { id: visitId }, data: { status: "INVOICED" } });
 
       return invoice;
     });
@@ -176,45 +117,24 @@ export const createInvoice = async (req, res, next) => {
   }
 };
 
-/**
- * PATCH /invoices/pay/:visitId
- */
 export const payInvoice = async (req, res, next) => {
   try {
     const { visitId } = req.params;
-
-    if (!visitId) {
-      return next(new AppError("Visit ID is required", 400));
-    }
+    if (!visitId) return next(new AppError("Visit ID is required", 400));
 
     const invoice = await prisma.invoice.findUnique({
       where: { visitId },
-
-      select: {
-        id: true,
-        visitId: true,
-        status: true,
-      },
+      select: { id: true, visitId: true, status: true },
     });
 
-    if (!invoice) {
-      return next(new AppError("Invoice not found", 404));
-    }
-
-    if (invoice.status === "PAID") {
-      return next(new AppError("Invoice is already PAID", 400));
-    }
+    if (!invoice) return next(new AppError("Invoice not found", 404));
+    if (invoice.status === "PAID") return next(new AppError("Invoice is already PAID", 400));
 
     const paidInvoice = await prisma.$transaction(async (tx) => {
       const updated = await tx.invoice.update({
         where: { visitId },
         data: { status: "PAID", paidAt: new Date() },
         include: INVOICE_INCLUDE,
-      });
-
-      await tx.visit.update({
-        where: { id: invoice.visitId },
-        data: { status: "PAID" },
       });
 
       return updated;
@@ -230,71 +150,78 @@ export const payInvoice = async (req, res, next) => {
   }
 };
 
-/**
- * GET /invoices/getById/:invoiceId
- */
-export const getInvoiceById = async (req, res, next) => {
+export const payInvoiceById = async (req, res, next) => {
   try {
     const { invoiceId } = req.params;
 
-    if (!invoiceId) {
-      return next(new AppError("Invoice ID is required", 400));
-    }
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, status: true, visitId: true },
+    });
 
-    const invoice = await ensureInvoiceExists(invoiceId);
+    if (!invoice) return next(new AppError("Invoice not found", 404));
+    if (invoice.status === "PAID") return next(new AppError("Invoice is already PAID", 400));
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.invoice.update({
+        where: { id: invoiceId },
+        data: { status: "PAID", paidAt: new Date() },
+        include: INVOICE_INCLUDE,
+      });
+
+      return result;
+    });
 
     res.status(200).json({
       success: true,
-      data: normalizeInvoice(invoice),
+      message: "Invoice marked as PAID",
+      data: normalizeInvoice(updated),
     });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * GET /invoices/visit/:visitId
- */
+export const getInvoiceById = async (req, res, next) => {
+  try {
+    const { invoiceId } = req.params;
+    if (!invoiceId) return next(new AppError("Invoice ID is required", 400));
+
+    const invoice = await ensureInvoiceExists(invoiceId);
+
+    res.status(200).json({ success: true, data: normalizeInvoice(invoice) });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getInvoiceByVisitId = async (req, res, next) => {
   try {
     const { visitId } = req.params;
-
-    if (!visitId) {
-      return next(new AppError("visitId is required", 400));
-    }
+    if (!visitId) return next(new AppError("visitId is required", 400));
 
     const invoice = await prisma.invoice.findUnique({
       where: { visitId },
       include: INVOICE_INCLUDE,
     });
 
-    if (!invoice) {
-      return next(new AppError("Invoice not found for this visit", 404));
-    }
+    if (!invoice) return next(new AppError("Invoice not found for this visit", 404));
 
-    res.status(200).json({
-      success: true,
-      data: normalizeInvoice(invoice),
-    });
+    res.status(200).json({ success: true, data: normalizeInvoice(invoice) });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * GET /invoices/getAll?branchId=:branchId&status=UNPAID|PAID&page=1&limit=10
- */
 export const getAllInvoices = async (req, res, next) => {
   try {
     const { page, limit, skip, sort, order } = pagination(req);
     const { branchId } = req.params;
     const { status } = req.query;
 
-    if (!branchId) {
-      return next(new AppError("branchId is required", 400));
-    }
+    if (!branchId) return next(new AppError("branchId is required", 400));
 
-    if (status && !VALID_INVOICE_STATUSES.has(status)) {
+    if (status && !VALID_STATUSES.has(status)) {
       return next(new AppError("Invalid status. Use UNPAID or PAID", 400));
     }
 
@@ -316,12 +243,7 @@ export const getAllInvoices = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
       data: invoices.map(normalizeInvoice),
     });
   } catch (error) {
@@ -329,9 +251,6 @@ export const getAllInvoices = async (req, res, next) => {
   }
 };
 
-/**
- * POST /invoices/createOrder/:orderId
- */
 export const createOrderInvoice = async (req, res, next) => {
   try {
     const { orderId } = req.params;
@@ -355,11 +274,13 @@ export const createOrderInvoice = async (req, res, next) => {
     });
     if (existing) return next(new AppError("Invoice already exists for this order", 409));
 
+    const totalAmount = Number(order.finalPrice);
     const invoice = await prisma.invoice.create({
       data: {
         orderId,
         branchId: order.branchId,
-        totalAmount: Number(order.finalPrice),
+        totalAmount,
+        finalAmount: totalAmount,
         status: "UNPAID",
       },
       include: INVOICE_INCLUDE,
@@ -371,101 +292,38 @@ export const createOrderInvoice = async (req, res, next) => {
       data: normalizeInvoice(invoice),
     });
   } catch (error) {
-    if (error?.code === "P2002") return next(new AppError("Invoice already exists for this order", 409));
+    if (error?.code === "P2002") {
+      return next(new AppError("Invoice already exists for this order", 409));
+    }
     next(error);
   }
 };
 
-/**
- * PATCH /invoices/payById/:invoiceId
- */
-export const payInvoiceById = async (req, res, next) => {
-  try {
-    const { invoiceId } = req.params;
-
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      select: { id: true, status: true, visitId: true },
-    });
-
-    if (!invoice) return next(new AppError("Invoice not found", 404));
-    if (invoice.status === "PAID") return next(new AppError("Invoice is already PAID", 400));
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.invoice.update({
-        where: { id: invoiceId },
-        data: { status: "PAID", paidAt: new Date() },
-        include: INVOICE_INCLUDE,
-      });
-
-      if (invoice.visitId) {
-        await tx.visit.update({
-          where: { id: invoice.visitId },
-          data: { status: "PAID" },
-        });
-      }
-
-      return result;
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Invoice marked as PAID",
-      data: normalizeInvoice(updated),
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * DELETE /invoices/delete/:invoiceId
- */
 export const deleteInvoice = async (req, res, next) => {
   try {
     const { invoiceId } = req.params;
-
-    if (!invoiceId) {
-      return next(new AppError("Invoice ID is required", 400));
-    }
+    if (!invoiceId) return next(new AppError("Invoice ID is required", 400));
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
-      select: {
-        id: true,
-        visitId: true,
-        status: true,
-      },
+      select: { id: true, visitId: true, status: true },
     });
 
-    if (!invoice) {
-      return next(new AppError("Invoice not found", 404));
-    }
-
+    if (!invoice) return next(new AppError("Invoice not found", 404));
     if (invoice.status === "PAID") {
       return next(new AppError("Cannot delete a PAID invoice", 400));
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.invoice.delete({
-        where: { id: invoiceId },
-      });
+      await tx.invoice.delete({ where: { id: invoiceId } });
 
       await tx.visit.updateMany({
-        where: {
-          id: invoice.visitId,
-          status: "INVOICED",
-        },
-        data: {
-          status: "CLOSED",
-        },
+        where: { id: invoice.visitId, status: "INVOICED" },
+        data: { status: "ACTIVE" },
       });
     });
 
-    res.status(200).json({
-      success: true,
-      message: "Invoice deleted successfully",
-    });
+    res.status(200).json({ success: true, message: "Invoice deleted successfully" });
   } catch (error) {
     next(error);
   }

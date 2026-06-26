@@ -25,14 +25,14 @@ const prisma = new PrismaClient({ adapter });
 // ═══════════════════════════════════════════════════════════════════
 
 const BUSINESS_ID = "52dc10db-6d71-4ee5-b575-327a26877292";
-const BRANCH_ID   = "2d5fc02a-1e68-4f11-8515-bcb9a3967632";
-const PLAN_ID     = "11223344-5566-4789-aaaa-bbbbccccdddd";
-const OWNER_ID    = "23344556-7788-49bb-ccdd-eeff00113322";
-const STAFF_ID    = "34455667-8899-4cc0-ddee-ff0011334422";
+const BRANCH_ID = "2d5fc02a-1e68-4f11-8515-bcb9a3967632";
+const PLAN_ID = "11223344-5566-4789-aaaa-bbbbccccdddd";
+const OWNER_ID = "23344556-7788-49bb-ccdd-eeff00113322";
+const STAFF_ID = "34455667-8899-4cc0-ddee-ff0011334422";
 
 // Spaces
-const SPACE_GAMING_ID  = "sp000001-0000-4000-8000-000000000001";
-const SPACE_VIP_ID     = "sp000002-0000-4000-8000-000000000002";
+const SPACE_GAMING_ID = "sp000001-0000-4000-8000-000000000001";
+const SPACE_VIP_ID = "sp000002-0000-4000-8000-000000000002";
 const SPACE_MEETING_ID = "sp000003-0000-4000-8000-000000000003";
 
 // Devices (match session.json resourceIds)
@@ -77,8 +77,8 @@ const PR_IDS = [
 
 // Staff
 const STAFF_PROFILE_ID = "sp100001-0000-4000-8000-000000000001";
-const NATIONAL_ID_ID   = "ni000001-0000-4000-8000-000000000001";
-const PAYROLL_ID       = "pa000001-0000-4000-8000-000000000001";
+const NATIONAL_ID_ID = "ni000001-0000-4000-8000-000000000001";
+const PAYROLL_ID = "pa000001-0000-4000-8000-000000000001";
 
 // Customers (match customer.json IDs)
 const CUSTOMER_IDS = [
@@ -161,9 +161,9 @@ const INVOICE_IDS = [
 ];
 
 // Categories
-const CAT_FOOD_ID   = "ca000001-0000-4000-8000-000000000001";
+const CAT_FOOD_ID = "ca000001-0000-4000-8000-000000000001";
 const CAT_GAMING_ID = "ca000002-0000-4000-8000-000000000002";
-const CAT_MERCH_ID  = "ca000003-0000-4000-8000-000000000003";
+const CAT_MERCH_ID = "ca000003-0000-4000-8000-000000000003";
 
 // Products
 const PROD_IDS = [
@@ -236,8 +236,14 @@ const PERMISSIONS = [
   { name: "VIEW-PLANS", description: "View subscription plans" },
   { name: "UPDATE-PLANS", description: "Update subscription plans" },
   { name: "DELETE-PLANS", description: "Delete subscription plans" },
-  { name: "VIEW-PRIVATE-PLANS", description: "View private subscription plans" },
-  { name: "CREATE-ROLE-PERMISSIONS", description: "Assign permissions to roles" },
+  {
+    name: "VIEW-PRIVATE-PLANS",
+    description: "View private subscription plans",
+  },
+  {
+    name: "CREATE-ROLE-PERMISSIONS",
+    description: "Assign permissions to roles",
+  },
   { name: "VIEW-ROLE-PERMISSIONS", description: "View role permissions" },
   { name: "UPDATE-ROLE-PERMISSIONS", description: "Update role permissions" },
   { name: "DELETE-ROLE-PERMISSIONS", description: "Delete role permissions" },
@@ -272,10 +278,22 @@ const PERMISSIONS = [
   { name: "VIEW-USERS", description: "View users" },
   { name: "UPDATE-USERS", description: "Update users" },
   { name: "DELETE-USERS", description: "Delete users" },
-  { name: "CREATE-BRANCH-USER-PERMISSIONS", description: "Create branch user permissions" },
-  { name: "VIEW-BRANCH-USER-PERMISSIONS", description: "View branch user permissions" },
-  { name: "UPDATE-BRANCH-USER-PERMISSIONS", description: "Update branch user permissions" },
-  { name: "DELETE-BRANCH-USER-PERMISSIONS", description: "Delete branch user permissions" },
+  {
+    name: "CREATE-BRANCH-USER-PERMISSIONS",
+    description: "Create branch user permissions",
+  },
+  {
+    name: "VIEW-BRANCH-USER-PERMISSIONS",
+    description: "View branch user permissions",
+  },
+  {
+    name: "UPDATE-BRANCH-USER-PERMISSIONS",
+    description: "Update branch user permissions",
+  },
+  {
+    name: "DELETE-BRANCH-USER-PERMISSIONS",
+    description: "Delete branch user permissions",
+  },
   { name: "CREATE-USER-PERMISSIONS", description: "Create user permissions" },
   { name: "VIEW-USER-PERMISSIONS", description: "View user permissions" },
   { name: "UPDATE-USER-PERMISSIONS", description: "Update user permissions" },
@@ -311,30 +329,60 @@ const PERMISSIONS = [
 ];
 
 const ROLES = [
-  { name: "ADMIN",     description: "System administrator" },
-  { name: "STAFF",     description: "Staff member" },
-  { name: "CUSTOMER",  description: "Customer user" },
-  { name: "OWNER",     description: "Business owner" },
+  { name: "ADMIN", description: "System administrator" },
+  { name: "STAFF", description: "Staff member" },
+  { name: "CUSTOMER", description: "Customer user" },
+  { name: "OWNER", description: "Business owner" },
   { name: "DEVELOPER", description: "Developer with full access" },
 ];
 
 // Permissions granted to staff at branch level
-const STAFF_BRANCH_PERMISSIONS = [
-  "VIEW-BRANCHES",
-  "VIEW-DEVICES",
-  "VIEW-SPACES",
-  "VIEW-UNITS",
-  "VIEW-EQUIPMENT",
-  "VIEW-PRICING-RULES",
-  "CREATE-VISITS", "VIEW-VISITS", "UPDATE-VISITS",
-  "CREATE-SESSIONS", "VIEW-SESSIONS", "UPDATE-SESSIONS",
-  "VIEW-STAFF-PROFILES", "UPDATE-STAFF-PROFILES",
-  "CREATE_CUSTOMER", "VIEW_CUSTOMER", "UPDATE_CUSTOMER",
-  "CREATE-INVOICES", "VIEW-INVOICES", "UPDATE-INVOICES",
-  "READ-CATEGORY", "READ-PRODUCTS", "UPDATE-PRODUCTS",
-  "createOrder", "viewOrder", "updateOrder", "viewOrderAnalytics", "viewOrderSummary",
-  "createOrderItem", "viewOrderItem", "updateOrderItem",
-];
+// Define role -> permission mappings
+const ROLE_PERMISSION_MAPPINGS = {
+  DEVELOPER: null, // null means ALL permissions
+  OWNER: null, // null means ALL permissions
+  ADMIN: null, // null means ALL permissions
+  STAFF: [
+    "VIEW-BRANCHES",
+    "VIEW-DEVICES",
+    "VIEW-SPACES",
+    "VIEW-UNITS",
+    "VIEW-EQUIPMENT",
+    "VIEW-PRICING-RULES",
+    "CREATE-VISITS",
+    "VIEW-VISITS",
+    "UPDATE-VISITS",
+    "CREATE-SESSIONS",
+    "VIEW-SESSIONS",
+    "UPDATE-SESSIONS",
+    "VIEW-STAFF-PROFILES",
+    "UPDATE-STAFF-PROFILES",
+    "CREATE_CUSTOMER",
+    "VIEW_CUSTOMER",
+    "UPDATE_CUSTOMER",
+    "CREATE-INVOICES",
+    "VIEW-INVOICES",
+    "UPDATE-INVOICES",
+    "READ-CATEGORY",
+    "READ-PRODUCTS",
+    "UPDATE-PRODUCTS",
+    "createOrder",
+    "viewOrder",
+    "updateOrder",
+    "viewOrderAnalytics",
+    "viewOrderSummary",
+    "createOrderItem",
+    "viewOrderItem",
+    "updateOrderItem",
+  ],
+  CUSTOMER: [
+    "VIEW_CUSTOMER",
+    "VIEW-VISITS",
+    "viewOrder",
+    "viewOrderItem",
+    "VIEW-INVOICES",
+  ],
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // MAIN
@@ -383,20 +431,56 @@ async function main() {
 
   // ── 3. Permissions ────────────────────────────────────────────────────────
   console.log("🔑 [3/27] Permissions...");
-  await prisma.permission.createMany({ data: PERMISSIONS, skipDuplicates: true });
-  const allPerms = await prisma.permission.findMany({ select: { id: true, name: true } });
+  await prisma.permission.createMany({
+    data: PERMISSIONS,
+    skipDuplicates: true,
+  });
+  const allPerms = await prisma.permission.findMany({
+    select: { id: true, name: true },
+  });
   console.log(`  ✓ Permissions (${allPerms.length})`);
 
   // ── 4. RolePermissions ────────────────────────────────────────────────────
   console.log("🔗 [4/27] Role permissions...");
-  const allRoles = await prisma.role.findMany({ select: { id: true, name: true } });
-  for (const role of allRoles) {
+  const allRoles = await prisma.role.findMany({
+    select: { id: true, name: true },
+  });
+
+  const permissionMap = new Map(allPerms.map((p) => [p.name, p.id]));
+  const rolePermissionEntries = [];
+
+  for (const [roleName, permissionNames] of Object.entries(
+    ROLE_PERMISSION_MAPPINGS,
+  )) {
+    const role = allRoles.find((r) => r.name === roleName);
+    if (!role) continue;
+
+    let permsToAssign = [];
+    if (permissionNames === null) {
+      permsToAssign = allPerms.map((p) => p.id);
+    } else {
+      permsToAssign = permissionNames
+        .map((name) => permissionMap.get(name))
+        .filter((id) => id !== undefined);
+    }
+
+    for (const permissionId of permsToAssign) {
+      rolePermissionEntries.push({ roleId: role.id, permissionId });
+    }
+  }
+
+  const chunkSize = 1000;
+  for (let i = 0; i < rolePermissionEntries.length; i += chunkSize) {
+    const chunk = rolePermissionEntries.slice(i, i + chunkSize);
     await prisma.rolePermission.createMany({
-      data: allPerms.map((p) => ({ roleId: role.id, permissionId: p.id })),
+      data: chunk,
       skipDuplicates: true,
     });
   }
-  console.log(`  ✓ RolePermissions (${allRoles.length} roles × ${allPerms.length} permissions)`);
+
+  console.log(
+    `  ✓ RolePermissions (${rolePermissionEntries.length} assignments)`,
+  );
 
   // ── 5. Users ─────────────────────────────────────────────────────────────
   console.log("👤 [5/27] Users...");
@@ -494,9 +578,30 @@ async function main() {
   // ── 10. Spaces ────────────────────────────────────────────────────────────
   console.log("🎮 [10/27] Spaces...");
   const spaces = [
-    { id: SPACE_GAMING_ID,  name: "Gaming Hall",   type: "PUBLIC",  capacity: 20, priceType: "PER_HOUR",    price: 80  },
-    { id: SPACE_VIP_ID,     name: "VIP Room",      type: "VIP",     capacity: 6,  priceType: "PER_HOUR",    price: 120 },
-    { id: SPACE_MEETING_ID, name: "Meeting Room",  type: "MEETING", capacity: 8,  priceType: "PER_SESSION", price: 200 },
+    {
+      id: SPACE_GAMING_ID,
+      name: "Gaming Hall",
+      type: "PUBLIC",
+      capacity: 20,
+      priceType: "PER_HOUR",
+      price: 80,
+    },
+    {
+      id: SPACE_VIP_ID,
+      name: "VIP Room",
+      type: "VIP",
+      capacity: 6,
+      priceType: "PER_HOUR",
+      price: 120,
+    },
+    {
+      id: SPACE_MEETING_ID,
+      name: "Meeting Room",
+      type: "MEETING",
+      capacity: 8,
+      priceType: "PER_SESSION",
+      price: 200,
+    },
   ];
   for (const s of spaces) {
     await prisma.space.upsert({
@@ -510,16 +615,76 @@ async function main() {
   // ── 11. Devices ───────────────────────────────────────────────────────────
   console.log("🖥️  [11/27] Devices...");
   const deviceData = [
-    { id: DEVICE_IDS[0], name: "PS5 Station 1",    type: "PS5_2",        spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[1], name: "PS5 Station 2",    type: "PS5_2",        spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[2], name: "PS5 Station 3",    type: "PS5_2",        spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[3], name: "PS5 Station 4",    type: "PS5_2",        spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[4], name: "Xbox Series X 1",  type: "XBOX_SERIES_X",spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[5], name: "Xbox Series X 2",  type: "XBOX_SERIES_X",spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[6], name: "Gaming PC 1",      type: "PC",           spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[7], name: "Gaming PC 2",      type: "PC",           spaceId: SPACE_GAMING_ID, price: 80  },
-    { id: DEVICE_IDS[8], name: "PS5 VIP 1",        type: "PS5_4",        spaceId: SPACE_VIP_ID,    price: 120 },
-    { id: DEVICE_IDS[9], name: "PS5 VIP 2",        type: "PS5_4",        spaceId: SPACE_VIP_ID,    price: 120 },
+    {
+      id: DEVICE_IDS[0],
+      name: "PS5 Station 1",
+      type: "PS5_2",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[1],
+      name: "PS5 Station 2",
+      type: "PS5_2",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[2],
+      name: "PS5 Station 3",
+      type: "PS5_2",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[3],
+      name: "PS5 Station 4",
+      type: "PS5_2",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[4],
+      name: "Xbox Series X 1",
+      type: "XBOX_SERIES_X",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[5],
+      name: "Xbox Series X 2",
+      type: "XBOX_SERIES_X",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[6],
+      name: "Gaming PC 1",
+      type: "PC",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[7],
+      name: "Gaming PC 2",
+      type: "PC",
+      spaceId: SPACE_GAMING_ID,
+      price: 80,
+    },
+    {
+      id: DEVICE_IDS[8],
+      name: "PS5 VIP 1",
+      type: "PS5_4",
+      spaceId: SPACE_VIP_ID,
+      price: 120,
+    },
+    {
+      id: DEVICE_IDS[9],
+      name: "PS5 VIP 2",
+      type: "PS5_4",
+      spaceId: SPACE_VIP_ID,
+      price: 120,
+    },
   ];
   for (const d of deviceData) {
     await prisma.device.upsert({
@@ -542,17 +707,25 @@ async function main() {
   // ── 12. Units ─────────────────────────────────────────────────────────────
   console.log("🏓 [12/27] Units...");
   const unitData = [
-    { id: UNIT_IDS[0], name: "Table Tennis 1",  type: "TABLE_TENNIS_TABLE" },
-    { id: UNIT_IDS[1], name: "Table Tennis 2",  type: "TABLE_TENNIS_TABLE" },
-    { id: UNIT_IDS[2], name: "Billiard Table 1",type: "BILLIARD_TABLE"     },
-    { id: UNIT_IDS[3], name: "Billiard Table 2",type: "BILLIARD_TABLE"     },
-    { id: UNIT_IDS[4], name: "Study Desk 1",    type: "DESK"               },
+    { id: UNIT_IDS[0], name: "Table Tennis 1", type: "TABLE_TENNIS_TABLE" },
+    { id: UNIT_IDS[1], name: "Table Tennis 2", type: "TABLE_TENNIS_TABLE" },
+    { id: UNIT_IDS[2], name: "Billiard Table 1", type: "BILLIARD_TABLE" },
+    { id: UNIT_IDS[3], name: "Billiard Table 2", type: "BILLIARD_TABLE" },
+    { id: UNIT_IDS[4], name: "Study Desk 1", type: "DESK" },
   ];
   for (const u of unitData) {
     await prisma.unit.upsert({
       where: { id: u.id },
       update: {},
-      create: { id: u.id, branchId: BRANCH_ID, name: u.name, type: u.type, priceType: "PER_HOUR", price: 60, isActive: true },
+      create: {
+        id: u.id,
+        branchId: BRANCH_ID,
+        name: u.name,
+        type: u.type,
+        priceType: "PER_HOUR",
+        price: 60,
+        isActive: true,
+      },
     });
   }
   console.log("  ✓ Units (5)");
@@ -560,10 +733,34 @@ async function main() {
   // ── 13. Equipment ─────────────────────────────────────────────────────────
   console.log("🕹️  [13/27] Equipment...");
   const equipData = [
-    { id: EQUIP_IDS[0], name: "DualSense Controller", type: "CONTROLLER", quantity: 10, price: 20 },
-    { id: EQUIP_IDS[1], name: "Xbox Controller",       type: "CONTROLLER", quantity: 8,  price: 20 },
-    { id: EQUIP_IDS[2], name: "Gaming Headset",         type: "HEADSET",    quantity: 5,  price: 15 },
-    { id: EQUIP_IDS[3], name: "Mechanical Keyboard",    type: "KEYBOARD",   quantity: 4,  price: 10 },
+    {
+      id: EQUIP_IDS[0],
+      name: "DualSense Controller",
+      type: "CONTROLLER",
+      quantity: 10,
+      price: 20,
+    },
+    {
+      id: EQUIP_IDS[1],
+      name: "Xbox Controller",
+      type: "CONTROLLER",
+      quantity: 8,
+      price: 20,
+    },
+    {
+      id: EQUIP_IDS[2],
+      name: "Gaming Headset",
+      type: "HEADSET",
+      quantity: 5,
+      price: 15,
+    },
+    {
+      id: EQUIP_IDS[3],
+      name: "Mechanical Keyboard",
+      type: "KEYBOARD",
+      quantity: 4,
+      price: 10,
+    },
   ];
   for (const e of equipData) {
     await prisma.equipment.upsert({
@@ -587,33 +784,62 @@ async function main() {
   console.log("💰 [14/27] PricingRules...");
   const pricingRules = [
     {
-      id: PR_IDS[0], name: "Gaming Hall — Per Hour",
-      branchId: BRANCH_ID, spaceId: SPACE_GAMING_ID,
-      pricingType: "PER_HOUR", pricingMode: "PER_HOUR", price: 80, isActive: true,
+      id: PR_IDS[0],
+      name: "Gaming Hall — Per Hour",
+      branchId: BRANCH_ID,
+      spaceId: SPACE_GAMING_ID,
+      pricingType: "PER_HOUR",
+      pricingMode: "PER_HOUR",
+      price: 80,
+      isActive: true,
     },
     {
-      id: PR_IDS[1], name: "VIP Room — Per Hour",
-      branchId: BRANCH_ID, spaceId: SPACE_VIP_ID,
-      pricingType: "PER_HOUR", pricingMode: "PER_HOUR", price: 120, isActive: true,
+      id: PR_IDS[1],
+      name: "VIP Room — Per Hour",
+      branchId: BRANCH_ID,
+      spaceId: SPACE_VIP_ID,
+      pricingType: "PER_HOUR",
+      pricingMode: "PER_HOUR",
+      price: 120,
+      isActive: true,
     },
     {
-      id: PR_IDS[2], name: "Table / Billiard — Per Hour",
-      branchId: BRANCH_ID, unitId: UNIT_IDS[0],
-      pricingType: "PER_HOUR", pricingMode: "PER_HOUR", price: 60, isActive: true,
+      id: PR_IDS[2],
+      name: "Table / Billiard — Per Hour",
+      branchId: BRANCH_ID,
+      unitId: UNIT_IDS[0],
+      pricingType: "PER_HOUR",
+      pricingMode: "PER_HOUR",
+      price: 60,
+      isActive: true,
     },
     {
-      id: PR_IDS[3], name: "Equipment — Per Hour",
-      branchId: BRANCH_ID, equipmentId: EQUIP_IDS[0],
-      pricingType: "PER_HOUR", pricingMode: "PER_HOUR", price: 20, isActive: true,
+      id: PR_IDS[3],
+      name: "Equipment — Per Hour",
+      branchId: BRANCH_ID,
+      equipmentId: EQUIP_IDS[0],
+      pricingType: "PER_HOUR",
+      pricingMode: "PER_HOUR",
+      price: 20,
+      isActive: true,
     },
     {
-      id: PR_IDS[4], name: "Meeting Room — Fixed",
-      branchId: BRANCH_ID, spaceId: SPACE_MEETING_ID,
-      pricingType: "PER_SESSION", pricingMode: "FIXED_PRICE", price: 200, isActive: true,
+      id: PR_IDS[4],
+      name: "Meeting Room — Fixed",
+      branchId: BRANCH_ID,
+      spaceId: SPACE_MEETING_ID,
+      pricingType: "PER_SESSION",
+      pricingMode: "FIXED_PRICE",
+      price: 200,
+      isActive: true,
     },
   ];
   for (const pr of pricingRules) {
-    await prisma.pricingRule.upsert({ where: { id: pr.id }, update: {}, create: pr });
+    await prisma.pricingRule.upsert({
+      where: { id: pr.id },
+      update: {},
+      create: pr,
+    });
   }
   console.log("  ✓ PricingRules (5)");
 
@@ -636,7 +862,9 @@ async function main() {
 
   // ── 16. NationalId ────────────────────────────────────────────────────────
   console.log("🪪 [16/27] NationalId...");
-  const existingNid = await prisma.nationalId.findUnique({ where: { staffProfileId: STAFF_PROFILE_ID } });
+  const existingNid = await prisma.nationalId.findUnique({
+    where: { staffProfileId: STAFF_PROFILE_ID },
+  });
   if (!existingNid) {
     await prisma.nationalId.create({
       data: {
@@ -644,7 +872,7 @@ async function main() {
         staffProfileId: STAFF_PROFILE_ID,
         number: "29501151234567",
         frontImage: "https://placehold.co/600x400?text=National+ID+Front",
-        backImage:  "https://placehold.co/600x400?text=National+ID+Back",
+        backImage: "https://placehold.co/600x400?text=National+ID+Back",
       },
     });
   }
@@ -653,7 +881,13 @@ async function main() {
   // ── 17. Payroll ───────────────────────────────────────────────────────────
   console.log("💳 [17/27] Payroll...");
   await prisma.payroll.upsert({
-    where: { staffProfileId_month_year: { staffProfileId: STAFF_PROFILE_ID, month: 4, year: 2026 } },
+    where: {
+      staffProfileId_month_year: {
+        staffProfileId: STAFF_PROFILE_ID,
+        month: 4,
+        year: 2026,
+      },
+    },
     update: {},
     create: {
       id: PAYROLL_ID,
@@ -677,28 +911,153 @@ async function main() {
   // ── 18. Customers ─────────────────────────────────────────────────────────
   console.log("👥 [18/27] Customers...");
   const customers = [
-    { id: CUSTOMER_IDS[0],  seq: 1,  name: "Ahmed Hassan",   phone: "01012345601", email: "ahmed.hassan@spacefyy.demo",   tags: ["VIP","Loyal"],       notes: "Prefers PS5 zone, usually books weekend evenings.", birthday: "1990-03-15", hasDiscount: true, discountType: "PERCENTAGE", discountAmount: 10 },
-    { id: CUSTOMER_IDS[1],  seq: 2,  name: "Mohamed Ali",    phone: "01123456702", email: "mohamed.ali@spacefyy.demo",    tags: ["Regular"] },
-    { id: CUSTOMER_IDS[2],  seq: 3,  name: "Sara Ibrahim",   phone: "01234567803", email: "sara.ibrahim@spacefyy.demo",   tags: ["New"],               notes: "Registered online, first visit pending." },
-    { id: CUSTOMER_IDS[3],  seq: 4,  name: "Youssef Khaled", phone: "01012348904", email: "youssef.khaled@spacefyy.demo", tags: ["Loyal"],              notes: "Always comes in a group of 4, prefers FIFA tournaments." },
-    { id: CUSTOMER_IDS[4],  seq: 5,  name: "Nour Mahmoud",   phone: "01123459005", email: "nour.mahmoud@spacefyy.demo",   tags: ["Regular"] },
-    { id: CUSTOMER_IDS[5],  seq: 6,  name: "Amr Sayed",      phone: "01234560006", email: "amr.sayed@spacefyy.demo",      tags: ["VIP"],               notes: "Corporate account — billed monthly.", hasDiscount: true, discountType: "FLAT", discountAmount: 50 },
-    { id: CUSTOMER_IDS[6],  seq: 7,  name: "Hana Mostafa",   phone: "01012341007", email: "hana.mostafa@spacefyy.demo",   tags: ["New"] },
-    { id: CUSTOMER_IDS[7],  seq: 8,  name: "Karim Omar",     phone: "01123452008", email: "karim.omar@spacefyy.demo",     tags: ["Blacklisted"],       notes: "Caused damage to equipment on 2026-03-20.", isBlocked: true, blockedReason: "Equipment damage — do not serve without manager approval." },
-    { id: CUSTOMER_IDS[8],  seq: 9,  name: "Mona Adel",      phone: "01234563009", email: "mona.adel@spacefyy.demo",      tags: ["Regular"] },
-    { id: CUSTOMER_IDS[9],  seq: 10, name: "Omar Fares",     phone: "01012344010", email: "omar.fares@spacefyy.demo",     tags: ["VIP","Loyal"],       notes: "Top spender, monthly average 800 EGP." },
-    { id: CUSTOMER_IDS[10], seq: 11, name: "Laila Hassan",   phone: "01123455011", email: "laila.hassan@spacefyy.demo",   tags: ["New"] },
-    { id: CUSTOMER_IDS[11], seq: 12, name: "Tarek Nasser",   phone: "01234566012", email: "tarek.nasser@spacefyy.demo",   tags: ["Regular"],           notes: "Prefers weekday afternoons, PC zone only." },
-    { id: CUSTOMER_IDS[12], seq: 13, name: "Dina Samir",     phone: "01012347013", email: "dina.samir@spacefyy.demo",     tags: ["VIP"],               notes: "Gift card holder, balance tracked separately." },
-    { id: CUSTOMER_IDS[13], seq: 14, name: "Rania Fouad",    phone: "01123458014", email: "rania.fouad@spacefyy.demo",    tags: ["Loyal"] },
-    { id: CUSTOMER_IDS[14], seq: 15, name: "Bassem Adly",    phone: "01234569015", email: "bassem.adly@spacefyy.demo",    tags: ["Regular"] },
+    {
+      id: CUSTOMER_IDS[0],
+      seq: 1,
+      name: "Ahmed Hassan",
+      phone: "01012345601",
+      email: "ahmed.hassan@spacefyy.demo",
+      tags: ["VIP", "Loyal"],
+      notes: "Prefers PS5 zone, usually books weekend evenings.",
+      birthday: "1990-03-15",
+      hasDiscount: true,
+      discountType: "PERCENTAGE",
+      discountAmount: 10,
+    },
+    {
+      id: CUSTOMER_IDS[1],
+      seq: 2,
+      name: "Mohamed Ali",
+      phone: "01123456702",
+      email: "mohamed.ali@spacefyy.demo",
+      tags: ["Regular"],
+    },
+    {
+      id: CUSTOMER_IDS[2],
+      seq: 3,
+      name: "Sara Ibrahim",
+      phone: "01234567803",
+      email: "sara.ibrahim@spacefyy.demo",
+      tags: ["New"],
+      notes: "Registered online, first visit pending.",
+    },
+    {
+      id: CUSTOMER_IDS[3],
+      seq: 4,
+      name: "Youssef Khaled",
+      phone: "01012348904",
+      email: "youssef.khaled@spacefyy.demo",
+      tags: ["Loyal"],
+      notes: "Always comes in a group of 4, prefers FIFA tournaments.",
+    },
+    {
+      id: CUSTOMER_IDS[4],
+      seq: 5,
+      name: "Nour Mahmoud",
+      phone: "01123459005",
+      email: "nour.mahmoud@spacefyy.demo",
+      tags: ["Regular"],
+    },
+    {
+      id: CUSTOMER_IDS[5],
+      seq: 6,
+      name: "Amr Sayed",
+      phone: "01234560006",
+      email: "amr.sayed@spacefyy.demo",
+      tags: ["VIP"],
+      notes: "Corporate account — billed monthly.",
+      hasDiscount: true,
+      discountType: "FLAT",
+      discountAmount: 50,
+    },
+    {
+      id: CUSTOMER_IDS[6],
+      seq: 7,
+      name: "Hana Mostafa",
+      phone: "01012341007",
+      email: "hana.mostafa@spacefyy.demo",
+      tags: ["New"],
+    },
+    {
+      id: CUSTOMER_IDS[7],
+      seq: 8,
+      name: "Karim Omar",
+      phone: "01123452008",
+      email: "karim.omar@spacefyy.demo",
+      tags: ["Blacklisted"],
+      notes: "Caused damage to equipment on 2026-03-20.",
+      isBlocked: true,
+      blockedReason:
+        "Equipment damage — do not serve without manager approval.",
+    },
+    {
+      id: CUSTOMER_IDS[8],
+      seq: 9,
+      name: "Mona Adel",
+      phone: "01234563009",
+      email: "mona.adel@spacefyy.demo",
+      tags: ["Regular"],
+    },
+    {
+      id: CUSTOMER_IDS[9],
+      seq: 10,
+      name: "Omar Fares",
+      phone: "01012344010",
+      email: "omar.fares@spacefyy.demo",
+      tags: ["VIP", "Loyal"],
+      notes: "Top spender, monthly average 800 EGP.",
+    },
+    {
+      id: CUSTOMER_IDS[10],
+      seq: 11,
+      name: "Laila Hassan",
+      phone: "01123455011",
+      email: "laila.hassan@spacefyy.demo",
+      tags: ["New"],
+    },
+    {
+      id: CUSTOMER_IDS[11],
+      seq: 12,
+      name: "Tarek Nasser",
+      phone: "01234566012",
+      email: "tarek.nasser@spacefyy.demo",
+      tags: ["Regular"],
+      notes: "Prefers weekday afternoons, PC zone only.",
+    },
+    {
+      id: CUSTOMER_IDS[12],
+      seq: 13,
+      name: "Dina Samir",
+      phone: "01012347013",
+      email: "dina.samir@spacefyy.demo",
+      tags: ["VIP"],
+      notes: "Gift card holder, balance tracked separately.",
+    },
+    {
+      id: CUSTOMER_IDS[13],
+      seq: 14,
+      name: "Rania Fouad",
+      phone: "01123458014",
+      email: "rania.fouad@spacefyy.demo",
+      tags: ["Loyal"],
+    },
+    {
+      id: CUSTOMER_IDS[14],
+      seq: 15,
+      name: "Bassem Adly",
+      phone: "01234569015",
+      email: "bassem.adly@spacefyy.demo",
+      tags: ["Regular"],
+    },
   ];
 
   // seq → actual DB id (the upsert may hit an existing row with a different id)
   const cid = {};
   for (const c of customers) {
     const result = await prisma.customer.upsert({
-      where: { businessId_seqNumber: { businessId: BUSINESS_ID, seqNumber: c.seq } },
+      where: {
+        businessId_seqNumber: { businessId: BUSINESS_ID, seqNumber: c.seq },
+      },
       update: { name: c.name, tags: c.tags ?? [] },
       create: {
         id: c.id,
@@ -724,16 +1083,66 @@ async function main() {
   // ── 19. CustomerBranch ────────────────────────────────────────────────────
   console.log("🔗 [19/27] CustomerBranch...");
   const cbData = [
-    { id: CB_IDS[0],  seq: 1,  reg: "2026-04-01T09:00:00Z", first: "2026-04-08T10:00:00Z" },
-    { id: CB_IDS[1],  seq: 2,  reg: "2026-04-01T09:10:00Z", first: "2026-04-10T14:30:00Z" },
-    { id: CB_IDS[2],  seq: 3,  reg: "2026-04-02T10:00:00Z", first: "2026-04-12T16:00:00Z" },
-    { id: CB_IDS[3],  seq: 4,  reg: "2026-04-02T11:00:00Z", first: "2026-04-15T11:00:00Z" },
-    { id: CB_IDS[4],  seq: 5,  reg: "2026-04-03T09:00:00Z", first: "2026-04-18T13:00:00Z" },
-    { id: CB_IDS[5],  seq: 6,  reg: "2026-04-03T10:00:00Z", first: "2026-04-20T15:00:00Z" },
-    { id: CB_IDS[6],  seq: 7,  reg: "2026-04-05T14:00:00Z", first: "2026-04-23T09:00:00Z" },
-    { id: CB_IDS[7],  seq: 8,  reg: "2026-04-07T15:00:00Z", first: "2026-04-26T12:00:00Z" },
-    { id: CB_IDS[8],  seq: 9,  reg: "2026-04-10T11:00:00Z", first: "2026-04-29T17:00:00Z" },
-    { id: CB_IDS[9],  seq: 10, reg: "2026-04-12T09:00:00Z", first: "2026-05-03T10:00:00Z" },
+    {
+      id: CB_IDS[0],
+      seq: 1,
+      reg: "2026-04-01T09:00:00Z",
+      first: "2026-04-08T10:00:00Z",
+    },
+    {
+      id: CB_IDS[1],
+      seq: 2,
+      reg: "2026-04-01T09:10:00Z",
+      first: "2026-04-10T14:30:00Z",
+    },
+    {
+      id: CB_IDS[2],
+      seq: 3,
+      reg: "2026-04-02T10:00:00Z",
+      first: "2026-04-12T16:00:00Z",
+    },
+    {
+      id: CB_IDS[3],
+      seq: 4,
+      reg: "2026-04-02T11:00:00Z",
+      first: "2026-04-15T11:00:00Z",
+    },
+    {
+      id: CB_IDS[4],
+      seq: 5,
+      reg: "2026-04-03T09:00:00Z",
+      first: "2026-04-18T13:00:00Z",
+    },
+    {
+      id: CB_IDS[5],
+      seq: 6,
+      reg: "2026-04-03T10:00:00Z",
+      first: "2026-04-20T15:00:00Z",
+    },
+    {
+      id: CB_IDS[6],
+      seq: 7,
+      reg: "2026-04-05T14:00:00Z",
+      first: "2026-04-23T09:00:00Z",
+    },
+    {
+      id: CB_IDS[7],
+      seq: 8,
+      reg: "2026-04-07T15:00:00Z",
+      first: "2026-04-26T12:00:00Z",
+    },
+    {
+      id: CB_IDS[8],
+      seq: 9,
+      reg: "2026-04-10T11:00:00Z",
+      first: "2026-04-29T17:00:00Z",
+    },
+    {
+      id: CB_IDS[9],
+      seq: 10,
+      reg: "2026-04-12T09:00:00Z",
+      first: "2026-05-03T10:00:00Z",
+    },
     { id: CB_IDS[10], seq: 11, reg: "2026-04-14T10:00:00Z", first: null },
     { id: CB_IDS[11], seq: 12, reg: "2026-04-16T12:00:00Z", first: null },
     { id: CB_IDS[12], seq: 13, reg: "2026-04-18T09:00:00Z", first: null },
@@ -759,18 +1168,97 @@ async function main() {
   // ── 20. Visits ────────────────────────────────────────────────────────────
   console.log("📋 [20/27] Visits...");
   const visitData = [
-    { id: VISIT_IDS[0], seq: 1,  start: "2026-04-08T10:00:00Z", end: "2026-04-08T11:00:00Z", dur: 60,  price: 80  },
-    { id: VISIT_IDS[1], seq: 2,  start: "2026-04-10T14:30:00Z", end: "2026-04-10T16:00:00Z", dur: 90,  price: 120 },
-    { id: VISIT_IDS[2], seq: 3,  start: "2026-04-12T16:00:00Z", end: "2026-04-12T18:00:00Z", dur: 120, price: 160 },
-    { id: VISIT_IDS[3], seq: 4,  start: "2026-04-15T11:00:00Z", end: "2026-04-15T11:45:00Z", dur: 45,  price: 60  },
-    { id: VISIT_IDS[4], seq: 5,  start: "2026-04-18T13:00:00Z", end: "2026-04-18T14:15:00Z", dur: 75,  price: 100 },
-    { id: VISIT_IDS[5], seq: 6,  start: "2026-04-20T15:00:00Z", end: "2026-04-20T15:30:00Z", dur: 30,  price: 40  },
-    { id: VISIT_IDS[6], seq: 7,  start: "2026-04-23T09:00:00Z", end: "2026-04-23T11:30:00Z", dur: 150, price: 200 },
-    { id: VISIT_IDS[7], seq: 8,  start: "2026-04-26T12:00:00Z", end: "2026-04-26T13:00:00Z", dur: 60,  price: 80  },
-    { id: VISIT_IDS[8], seq: 9,  start: "2026-04-29T17:00:00Z", end: "2026-04-29T19:00:00Z", dur: 120, price: 160 },
-    { id: VISIT_IDS[9], seq: 10, start: "2026-05-03T10:00:00Z", end: "2026-05-03T11:30:00Z", dur: 90,  price: 120 },
+    {
+      id: VISIT_IDS[0],
+      seq: 1,
+      start: "2026-04-08T10:00:00Z",
+      end: "2026-04-08T11:00:00Z",
+      dur: 60,
+      price: 80,
+    },
+    {
+      id: VISIT_IDS[1],
+      seq: 2,
+      start: "2026-04-10T14:30:00Z",
+      end: "2026-04-10T16:00:00Z",
+      dur: 90,
+      price: 120,
+    },
+    {
+      id: VISIT_IDS[2],
+      seq: 3,
+      start: "2026-04-12T16:00:00Z",
+      end: "2026-04-12T18:00:00Z",
+      dur: 120,
+      price: 160,
+    },
+    {
+      id: VISIT_IDS[3],
+      seq: 4,
+      start: "2026-04-15T11:00:00Z",
+      end: "2026-04-15T11:45:00Z",
+      dur: 45,
+      price: 60,
+    },
+    {
+      id: VISIT_IDS[4],
+      seq: 5,
+      start: "2026-04-18T13:00:00Z",
+      end: "2026-04-18T14:15:00Z",
+      dur: 75,
+      price: 100,
+    },
+    {
+      id: VISIT_IDS[5],
+      seq: 6,
+      start: "2026-04-20T15:00:00Z",
+      end: "2026-04-20T15:30:00Z",
+      dur: 30,
+      price: 40,
+    },
+    {
+      id: VISIT_IDS[6],
+      seq: 7,
+      start: "2026-04-23T09:00:00Z",
+      end: "2026-04-23T11:30:00Z",
+      dur: 150,
+      price: 200,
+    },
+    {
+      id: VISIT_IDS[7],
+      seq: 8,
+      start: "2026-04-26T12:00:00Z",
+      end: "2026-04-26T13:00:00Z",
+      dur: 60,
+      price: 80,
+    },
+    {
+      id: VISIT_IDS[8],
+      seq: 9,
+      start: "2026-04-29T17:00:00Z",
+      end: "2026-04-29T19:00:00Z",
+      dur: 120,
+      price: 160,
+    },
+    {
+      id: VISIT_IDS[9],
+      seq: 10,
+      start: "2026-05-03T10:00:00Z",
+      end: "2026-05-03T11:30:00Z",
+      dur: 90,
+      price: 120,
+    },
   ];
   for (const v of visitData) {
+    // Map legacy status values to current VisitStatus enum
+    const mapVisitStatus = (s) => {
+      if (!s) return s;
+      if (s === "PAID") return "INVOICED";
+      return s;
+    };
+
+    const mappedStatus = mapVisitStatus(v.status || "PAID");
+
     await prisma.visit.upsert({
       where: { id: v.id },
       update: {},
@@ -778,7 +1266,7 @@ async function main() {
         id: v.id,
         branchId: BRANCH_ID,
         customerId: cid[v.seq],
-        status: "PAID",
+        status: mappedStatus,
         startedAt: new Date(v.start),
         endedAt: new Date(v.end),
         durationMinutes: v.dur,
@@ -792,6 +1280,7 @@ async function main() {
   console.log("🎯 [21/27] Sessions...");
   for (let i = 0; i < visitData.length; i++) {
     const v = visitData[i];
+    // Create session (without resourceType/resourceId)
     await prisma.session.upsert({
       where: { id: SESSION_IDS[i] },
       update: {},
@@ -799,12 +1288,6 @@ async function main() {
         id: SESSION_IDS[i],
         branchId: BRANCH_ID,
         visitId: v.id,
-        resourceType: "DEVICE",
-        resourceId: DEVICE_IDS[i],
-        priceType: "PER_HOUR",
-        basePrice: 80,
-        gamesCount: 1,
-        unitPrice: 80,
         totalPrice: v.price,
         currency: "EGP",
         startedAt: new Date(v.start),
@@ -815,13 +1298,37 @@ async function main() {
         endedById: STAFF_ID,
       },
     });
+
+    // Create matching SessionComponent for the resource
+    const compId = `${SESSION_IDS[i]}-component`;
+    await prisma.sessionComponent.upsert({
+      where: { id: compId },
+      update: {},
+      create: {
+        id: compId,
+        sessionId: SESSION_IDS[i],
+        branchId: BRANCH_ID,
+        resourceType: "DEVICE",
+        resourceId: DEVICE_IDS[i],
+        priceType: "PER_HOUR",
+        unitPrice: 80,
+        quantity: 1,
+        gamesCount: 1,
+        startedAt: new Date(v.start),
+        endedAt: new Date(v.end),
+        durationMinutes: v.dur,
+        totalPrice: v.price,
+      },
+    });
   }
   console.log("  ✓ Sessions (10)");
 
   // ── 22. Invoices ──────────────────────────────────────────────────────────
   console.log("🧾 [22/27] Invoices...");
   for (let i = 0; i < visitData.length; i++) {
-    const existing = await prisma.invoice.findUnique({ where: { visitId: visitData[i].id } });
+    const existing = await prisma.invoice.findUnique({
+      where: { visitId: visitData[i].id },
+    });
     if (!existing) {
       await prisma.invoice.create({
         data: {
@@ -839,15 +1346,15 @@ async function main() {
   // ── 23. CategoryProduct ───────────────────────────────────────────────────
   console.log("🗂️  [23/27] CategoryProduct...");
   const categories = [
-    { id: CAT_FOOD_ID,   name: "Food & Drinks"       },
-    { id: CAT_GAMING_ID, name: "Gaming Accessories"   },
-    { id: CAT_MERCH_ID,  name: "Merchandise"          },
+    { id: CAT_FOOD_ID, name: "Food & Drinks" },
+    { id: CAT_GAMING_ID, name: "Gaming Accessories" },
+    { id: CAT_MERCH_ID, name: "Merchandise" },
   ];
   for (const cat of categories) {
     await prisma.categoryProduct.upsert({
-      where: { name: cat.name },
+      where: { name_branchId: { name: cat.name, branchId: BRANCH_ID } },
       update: {},
-      create: cat,
+      create: { id: cat.id, name: cat.name, branchId: BRANCH_ID },
     });
   }
   console.log("  ✓ CategoryProduct (3)");
@@ -855,16 +1362,52 @@ async function main() {
   // ── 24. Products ──────────────────────────────────────────────────────────
   console.log("🛍️  [24/27] Products...");
   const products = [
-    { id: PROD_IDS[0], name: "Pepsi",               categoryId: CAT_FOOD_ID,   price: 25,  qty: 50  },
-    { id: PROD_IDS[1], name: "Water",               categoryId: CAT_FOOD_ID,   price: 10,  qty: 100 },
-    { id: PROD_IDS[2], name: "Chicken Sandwich",    categoryId: CAT_FOOD_ID,   price: 65,  qty: 30  },
-    { id: PROD_IDS[3], name: "USB Controller",      categoryId: CAT_GAMING_ID, price: 350, qty: 15  },
-    { id: PROD_IDS[4], name: "Gaming Headset",      categoryId: CAT_GAMING_ID, price: 450, qty: 10  },
-    { id: PROD_IDS[5], name: "Spacefyy Mug",        categoryId: CAT_MERCH_ID,  price: 120, qty: 25  },
+    {
+      id: PROD_IDS[0],
+      name: "Pepsi",
+      categoryId: CAT_FOOD_ID,
+      price: 25,
+      qty: 50,
+    },
+    {
+      id: PROD_IDS[1],
+      name: "Water",
+      categoryId: CAT_FOOD_ID,
+      price: 10,
+      qty: 100,
+    },
+    {
+      id: PROD_IDS[2],
+      name: "Chicken Sandwich",
+      categoryId: CAT_FOOD_ID,
+      price: 65,
+      qty: 30,
+    },
+    {
+      id: PROD_IDS[3],
+      name: "USB Controller",
+      categoryId: CAT_GAMING_ID,
+      price: 350,
+      qty: 15,
+    },
+    {
+      id: PROD_IDS[4],
+      name: "Gaming Headset",
+      categoryId: CAT_GAMING_ID,
+      price: 450,
+      qty: 10,
+    },
+    {
+      id: PROD_IDS[5],
+      name: "Spacefyy Mug",
+      categoryId: CAT_MERCH_ID,
+      price: 120,
+      qty: 25,
+    },
   ];
   for (const p of products) {
     await prisma.product.upsert({
-      where: { name_branchId: { name: p.name, branchId: BRANCH_ID } },
+      where: { id: p.id },
       update: {},
       create: {
         id: p.id,
@@ -872,7 +1415,7 @@ async function main() {
         categoryId: p.categoryId,
         name: p.name,
         price: p.price,
-        quantity: p.qty,
+        stock: p.qty,
         isActive: true,
       },
     });
@@ -883,39 +1426,57 @@ async function main() {
   console.log("🛒 [25/27] Orders + OrderItems...");
   const ordersData = [
     {
-      id: ORDER_IDS[0], visitId: VISIT_IDS[0], seq: 1, number: 1,
-      total: 60, final: 60,
+      id: ORDER_IDS[0],
+      visitId: VISIT_IDS[0],
+      seq: 1,
+      number: 1,
+      total: 60,
+      final: 60,
       items: [
         { id: OI_IDS[0], pid: PROD_IDS[0], qty: 2, unit: 25, total: 50 },
         { id: OI_IDS[1], pid: PROD_IDS[1], qty: 1, unit: 10, total: 10 },
       ],
     },
     {
-      id: ORDER_IDS[1], visitId: VISIT_IDS[1], seq: 2, number: 2,
-      total: 90, final: 90,
+      id: ORDER_IDS[1],
+      visitId: VISIT_IDS[1],
+      seq: 2,
+      number: 2,
+      total: 90,
+      final: 90,
       items: [
         { id: OI_IDS[2], pid: PROD_IDS[2], qty: 1, unit: 65, total: 65 },
         { id: OI_IDS[3], pid: PROD_IDS[0], qty: 1, unit: 25, total: 25 },
       ],
     },
     {
-      id: ORDER_IDS[2], visitId: VISIT_IDS[2], seq: 3, number: 3,
-      total: 30, final: 30,
-      items: [
-        { id: OI_IDS[4], pid: PROD_IDS[1], qty: 3, unit: 10, total: 30 },
-      ],
+      id: ORDER_IDS[2],
+      visitId: VISIT_IDS[2],
+      seq: 3,
+      number: 3,
+      total: 30,
+      final: 30,
+      items: [{ id: OI_IDS[4], pid: PROD_IDS[1], qty: 3, unit: 10, total: 30 }],
     },
     {
-      id: ORDER_IDS[3], visitId: VISIT_IDS[3], seq: 4, number: 4,
-      total: 145, final: 145,
+      id: ORDER_IDS[3],
+      visitId: VISIT_IDS[3],
+      seq: 4,
+      number: 4,
+      total: 145,
+      final: 145,
       items: [
         { id: OI_IDS[5], pid: PROD_IDS[5], qty: 1, unit: 120, total: 120 },
-        { id: OI_IDS[6], pid: PROD_IDS[0], qty: 1, unit: 25,  total: 25  },
+        { id: OI_IDS[6], pid: PROD_IDS[0], qty: 1, unit: 25, total: 25 },
       ],
     },
     {
-      id: ORDER_IDS[4], visitId: VISIT_IDS[4], seq: 5, number: 5,
-      total: 130, final: 130,
+      id: ORDER_IDS[4],
+      visitId: VISIT_IDS[4],
+      seq: 5,
+      number: 5,
+      total: 130,
+      final: 130,
       items: [
         { id: OI_IDS[7], pid: PROD_IDS[2], qty: 2, unit: 65, total: 130 },
       ],
@@ -951,21 +1512,33 @@ async function main() {
   // ── 26. BranchMonthlyStats ────────────────────────────────────────────────
   console.log("📊 [26/27] BranchMonthlyStats...");
   await prisma.branchMonthlyStats.upsert({
-    where: { branchId_month_year: { branchId: BRANCH_ID, month: 4, year: 2026 } },
+    where: {
+      branchId_month_year: { branchId: BRANCH_ID, month: 4, year: 2026 },
+    },
     update: {},
     create: {
-      branchId: BRANCH_ID, month: 4, year: 2026,
-      newCustomers: 12, activeCustomers: 9,
-      totalRevenue: 1000, avgSpendPerCustomer: 111.11,
+      branchId: BRANCH_ID,
+      month: 4,
+      year: 2026,
+      newCustomers: 12,
+      activeCustomers: 9,
+      totalRevenue: 1000,
+      avgSpendPerCustomer: 111.11,
     },
   });
   await prisma.branchMonthlyStats.upsert({
-    where: { branchId_month_year: { branchId: BRANCH_ID, month: 5, year: 2026 } },
+    where: {
+      branchId_month_year: { branchId: BRANCH_ID, month: 5, year: 2026 },
+    },
     update: {},
     create: {
-      branchId: BRANCH_ID, month: 5, year: 2026,
-      newCustomers: 3, activeCustomers: 1,
-      totalRevenue: 120, avgSpendPerCustomer: 120,
+      branchId: BRANCH_ID,
+      month: 5,
+      year: 2026,
+      newCustomers: 3,
+      activeCustomers: 1,
+      totalRevenue: 120,
+      avgSpendPerCustomer: 120,
     },
   });
   console.log("  ✓ BranchMonthlyStats (Apr + May 2026)");
@@ -973,7 +1546,7 @@ async function main() {
   // ── 27. BranchUserPermissions ─────────────────────────────────────────────
   console.log("🛡️  [27/27] BranchUserPermissions...");
   const staffBranchPerms = allPerms.filter((p) =>
-    STAFF_BRANCH_PERMISSIONS.includes(p.name)
+    ROLE_PERMISSION_MAPPINGS.STAFF.includes(p.name),
   );
   await prisma.branchUserPermission.createMany({
     data: staffBranchPerms.map((p) => ({
@@ -984,7 +1557,9 @@ async function main() {
     })),
     skipDuplicates: true,
   });
-  console.log(`  ✓ BranchUserPermissions (${staffBranchPerms.length} for staff)`);
+  console.log(
+    `  ✓ BranchUserPermissions (${staffBranchPerms.length} for staff)`,
+  );
 
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`

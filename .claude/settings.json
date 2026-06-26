@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"d:\\\\Youssef\\\\spacefyy\" -Recurse -Filter \"*controller*\" -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(ls -la \"d:\\\\Youssef\\\\spacefyy\\\\\" | head -20)",
+      "Read(//d/Youssef/**)",
+      "Bash(New-Item -ItemType Directory -Path \"d:\\\\Youssef\\\\spacefyy\\\\prisma\\\\migrations\\\\20260522000000_add_branchId_to_category\" -Force)",
+      "Bash(Out-Null)",
+      "Bash(Write-Host \"Created\")"
+    ]
+  }
+}

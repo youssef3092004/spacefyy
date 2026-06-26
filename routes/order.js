@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   addOrderItems,
-  getVisitOrder,
+  getVisitOrder,  
   updateItemQuantity,
   removeItem,
   completeOrder,
@@ -114,7 +114,7 @@ router.get(
   cacheMiddleware(
     (req) => {
       const q = req.query;
-      return `orders:page=${q.page || 1}:limit=${q.limit || 10}:branchId=${q.branchId || "all"}:visitId=${q.visitId || ""}`;
+      return `orders:page=${q.page || 1}:limit=${q.limit || 10}:branchId=${q.branchId || "all"}:visitId=${q.visitId || ""}:filter=${q.filter || ""}:search=${q.search || ""}`;
     },
     "TTL_LIST",
   ),

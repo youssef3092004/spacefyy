@@ -1,14 +1,17 @@
 [
   {
     "id": "ca000001-0000-4000-8000-000000000001",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "name": "Food & Drinks"
   },
   {
     "id": "ca000002-0000-4000-8000-000000000002",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "name": "Gaming Accessories"
   },
   {
     "id": "ca000003-0000-4000-8000-000000000003",
+    "branchId": "2d5fc02a-1e68-4f11-8515-bcb9a3967632",
     "name": "Merchandise"
   }
 ]

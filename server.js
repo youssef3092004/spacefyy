@@ -1,6 +1,7 @@
 import "dotenv/config";
 import process from "process";
 import express from "express";
+import { createServer } from "http";
 import { connectDB } from "./configs/db.js";
 import helmet from "helmet";
 import cors from "cors";
@@ -12,9 +13,12 @@ import { fileURLToPath } from "url";
 import { startStorageUsageCron } from "./utils/storageUsageCron.js";
 import { startBranchStatsCron } from "./utils/branchStatsCron.js";
 import { autoInvalidateCache } from "./middleware/autoInvalidateCache.js";
+import { Server } from "socket.io";
+import { initializeWebSocketSpaceOverView } from "./controllers/webSocketSpaceOverView.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const httpServer = createServer(app);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "images")));
 
@@ -74,12 +78,14 @@ import storageUsageRouter from "./routes/storageUsage.js";
 import customerRouter from "./routes/customer.js";
 import visitRouter from "./routes/visit.js";
 import sessionRouter from "./routes/session.js";
+import sessionComponentRouter from "./routes/sessionComponent.js";
 import productRouter from "./routes/product.js";
 import categoryRouter from "./routes/category.js";
 import orderRouter from "./routes/order.js";
 import orderItemRouter from "./routes/orderItem.js";
 import invoiceRouter from "./routes/invoice.js";
 import analyticsRouter from "./routes/analytics.js";
+import webSocketSpaceOverViewRouter from "./routes/webSocketSpaceOverView.js";
 
 import seedRouter from "./seeds/permissions.js";
 
@@ -106,12 +112,14 @@ app.use("/api/v1/storage-usage", storageUsageRouter);
 app.use("/api/v1/customers", customerRouter);
 app.use("/api/v1/visits", visitRouter);
 app.use("/api/v1/sessions", sessionRouter);
+app.use("/api/v1/session-components", sessionComponentRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/orders", orderRouter);
 app.use("/api/v1/order-items", orderItemRouter);
 app.use("/api/v1/invoices", invoiceRouter);
 app.use("/api/v1/analytics", analyticsRouter);
+app.use("/api/v1/websocket-space-overview", webSocketSpaceOverViewRouter);
 
 app.use("/api/v1/seed-permissions", seedRouter);
 
@@ -122,8 +130,16 @@ app.get("/", (req, res) => {
 // Error Handling Middleware
 app.use(errorHandler);
 
-//const server =
-app.listen(PORT, () => {
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+initializeWebSocketSpaceOverView(io);
+
+httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 

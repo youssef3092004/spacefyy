@@ -2,6 +2,7 @@ import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
 import { redisClient } from "../configs/redis.js";
+import { invalidateSpaceCache } from "./spaceAvailability.js";
 
 const UNIT_TYPES = [
   "TABLE_TENNIS_TABLE",
@@ -44,6 +45,7 @@ const fixPriceType = (priceType) => {
 };
 
 const invalidateListCache = async (branchId) => {
+  await invalidateSpaceCache(branchId);
   const keys = await redisClient.keys(`units:branchId=${branchId}*`);
   if (keys.length > 0) await redisClient.del(keys);
 };

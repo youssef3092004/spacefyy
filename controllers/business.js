@@ -234,24 +234,46 @@ export const updateBusinessById = async (req, res, next) => {
     if (!existingBusiness) {
       return next(new AppError("Business not found", 404));
     }
-    if (!name || !ownerId) {
-      return next(new AppError("Name and ownerId are required", 400));
+
+    const updateData = {};
+
+    if (name !== undefined) {
+      if (!name) {
+        return next(new AppError("Name cannot be empty", 400));
+      }
+      updateData.name = name;
     }
-    const existOwner = await prisma.user.findUnique({
-      where: { id: ownerId },
-    });
-    if (!existOwner) {
-      return next(new AppError("Owner not found", 404));
+
+    if (ownerId !== undefined) {
+      if (!ownerId) {
+        return next(new AppError("ownerId cannot be empty", 400));
+      }
+
+      const existOwner = await prisma.user.findUnique({
+        where: { id: ownerId },
+      });
+      if (!existOwner) {
+        return next(new AppError("Owner not found", 404));
+      }
+
+      updateData.ownerId = ownerId;
     }
+
+    if (Object.keys(updateData).length === 0) {
+      return next(new AppError("Provide at least one field to update", 400));
+    }
+
     const updatedBusiness = await prisma.business.update({
       where: { id: id },
-      data: {
-        owner: {
-          connect: { id: ownerId },
-        },
-        name,
-      },
+      data: updateData,
       include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
         plan: {
           select: {
             id: true,
