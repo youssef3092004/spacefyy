@@ -582,10 +582,6 @@ export const getAllCustomersBybusinessId = async (req, res, next) => {
       prisma.customer.count({ where }),
     ]);
 
-    if (!customers.length) {
-      return next(new AppError("No customers found for this business", 404));
-    }
-
     const totalPages = Math.ceil(total / limit);
 
     res.status(200).json({
@@ -621,9 +617,6 @@ export const getAllCustomers = async (req, res, next) => {
       }),
       prisma.customer.count(),
     ]);
-    if (!customers.length) {
-      return next(new AppError("No customers found", 404));
-    }
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({
       success: true,

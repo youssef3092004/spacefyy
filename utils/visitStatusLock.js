@@ -6,6 +6,7 @@ export const ensureCanStartVisit = (visitStatus) => {
   if (visitStatus === "ACTIVE") {
     throw new AppError("Customer already has an active visit", 409);
   }
+  // CANCELLED and INVOICED both allow starting a new visit
 };
 
 // Backward-compatible alias for existing imports/usages.

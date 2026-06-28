@@ -179,7 +179,7 @@ const resolveSpaceWithResources = async (spaceId, branchId) => {
 
 const resolveComponentsFromDevice = async (deviceId, branchId) => {
   const device = await prisma.device.findFirst({
-    where: { id: deviceId, branchId, isActive: true },
+    where: { id: deviceId, branchId, isActive: true, isDeleted: false },
     select: { id: true, spaceId: true },
   });
   if (!device) throw new AppError("Device not found for this branch", 404);
@@ -215,41 +215,64 @@ const resolveComponentsFromUnit = async (unitId, branchId) => {
   ];
 };
 
+const resolveComponentsFromSpace = async (spaceId, branchId) => {
+  const space = await prisma.space.findFirst({
+    where: { id: spaceId, branchId, isActive: true, isDeleted: false },
+    select: {
+      id: true,
+      devices: {
+        where: { branchId, isActive: true, isDeleted: false },
+        select: { id: true },
+      },
+      units: {
+        where: { branchId, isActive: true, isDeleted: false },
+        select: { id: true },
+      },
+    },
+  });
+  if (!space) throw new AppError("Space not found for this branch", 404);
+
+  return [
+    { resourceType: "SPACE", resourceId: space.id },
+    ...space.devices.map((d) => ({ resourceType: "DEVICE", resourceId: d.id })),
+    ...space.units.map((u) => ({ resourceType: "UNIT", resourceId: u.id })),
+  ];
+};
+
 // ─── Controllers ──────────────────────────────────────────────────────────────
 
 export const createSession = async (req, res, next) => {
   try {
     const { branchId } = req.params;
-    const { visitId, bookingId, startedAt, deviceId, unitId, components } =
+    const { visitId, bookingId, startedAt, deviceId, unitId, spaceId, components } =
       req.body ?? {};
 
     if (!branchId || !visitId) {
       return next(new AppError("branchId and visitId are required", 400));
     }
 
-    const smartId = deviceId || unitId;
+    const smartIds = [deviceId, unitId, spaceId].filter(Boolean);
     const hasManual = Array.isArray(components) && components.length > 0;
 
-    // Exactly one mode must be provided: smartId (deviceId/unitId) or manual components[].
-    if (!smartId && !hasManual) {
+    if (smartIds.length === 0 && !hasManual) {
       return next(
         new AppError(
-          "Provide deviceId, unitId, or a non-empty components array",
+          "Provide deviceId, unitId, spaceId, or a non-empty components array",
           400,
         ),
       );
     }
-    if (smartId && hasManual) {
+    if (smartIds.length > 1) {
       return next(
-        new AppError(
-          "Provide either deviceId/unitId or components, not both",
-          400,
-        ),
+        new AppError("Provide only one of deviceId, unitId, or spaceId", 400),
       );
     }
-    if (deviceId && unitId) {
+    if (smartIds.length > 0 && hasManual) {
       return next(
-        new AppError("Provide either deviceId or unitId, not both", 400),
+        new AppError(
+          "Provide either deviceId/unitId/spaceId or components, not both",
+          400,
+        ),
       );
     }
 
@@ -300,6 +323,8 @@ export const createSession = async (req, res, next) => {
         rawComponents = await resolveComponentsFromDevice(deviceId, branchId);
       } else if (unitId) {
         rawComponents = await resolveComponentsFromUnit(unitId, branchId);
+      } else if (spaceId) {
+        rawComponents = await resolveComponentsFromSpace(spaceId, branchId);
       } else {
         rawComponents = components;
       }
@@ -598,6 +623,25 @@ export const deleteSessionById = async (req, res, next) => {
     const existingSession = await getSessionByIdOrThrow(sessionId);
     ensureBranchMatch(existingSession.branchId, branchId);
     const actorUserId = await resolveActorUserId(req);
+
+    if (existingSession.status === "ACTIVE") {
+      const cancelledAt = new Date();
+      await prisma.$transaction(async (tx) => {
+        for (const comp of existingSession.components) {
+          if (!comp.endedAt) {
+            await tx.sessionComponent.update({
+              where: { id: comp.id },
+              data: { endedAt: cancelledAt, durationMinutes: 0, totalPrice: 0 },
+            });
+            await releaseResourceAvailability(tx, {
+              resourceType: comp.resourceType,
+              resourceId: comp.resourceId,
+              branchId: comp.branchId,
+            });
+          }
+        }
+      });
+    }
 
     await prisma.session.update({
       where: { id: sessionId },

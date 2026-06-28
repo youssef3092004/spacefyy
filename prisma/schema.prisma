@@ -130,6 +130,7 @@ enum PlanType {
 enum VisitStatus {
   ACTIVE
   INVOICED
+  CANCELLED
 }
 
 enum InvoiceStatus {
@@ -190,6 +191,7 @@ model User {
   sessionsEnded         Session[]              @relation("SessionEndedBy")
   sessionsCanceled      Session[]              @relation("SessionCanceledBy")
   sessionsDeleted       Session[]              @relation("SessionDeletedBy")
+  visitsCancelled       Visit[]                @relation("VisitCancelledBy")
 
   isDeleted Boolean   @default(false)
   deletedAt DateTime?
@@ -747,7 +749,12 @@ model Visit {
 
   status VisitStatus
 
+  notes String?
+
   durationMinutes Int?
+
+  cancelledAt   DateTime?
+  cancelledById String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -755,6 +762,7 @@ model Visit {
   branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
+  cancelledBy User?        @relation("VisitCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
   invoice     Invoice?
   sessions    Session[]
   orders      Order[]

@@ -165,7 +165,7 @@ export const createDevice = async (req, res, next) => {
     }
 
     res.status(201).json({
-      status: "success",
+      success: true,
       message: "Device created successfully",
       data: newDevice,
       incrementStorage,
@@ -196,7 +196,7 @@ export const getDeviceById = async (req, res, next) => {
     if (!device || device === 0) {
       return next(new AppError("Device not found", 404));
     }
-    res.status(200).json({ status: "success", data: device });
+    res.status(200).json({ success: true, data: device });
   } catch (error) {
     next(error);
   }
@@ -222,7 +222,7 @@ export const getAllDevices = async (req, res, next) => {
     ]);
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({
-      status: "success",
+      success: true,
       data: devices,
       meta: {
         page,
@@ -307,7 +307,7 @@ export const getAllByBranchId = async (req, res, next) => {
 
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({
-      status: "success",
+      success: true,
       data: devices,
       meta: {
         page,
@@ -365,7 +365,7 @@ export const getDevicesByType = async (req, res, next) => {
     });
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: devices,
     });
   } catch (error) {
@@ -387,15 +387,14 @@ export const updateDeviceById = async (req, res, next) => {
       "isBusy",
       "isActive",
     ];
-    const updates = { ...req.body };
-    if (updates.pricingType && !updates.priceType) {
-      updates.priceType = updates.pricingType;
-      delete updates.pricingType;
+    const updates = {};
+    for (const key of allowedUpdates) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
-    const isValidOperation = Object.keys(updates).filter((update) =>
-      allowedUpdates.includes(update),
-    );
-    if ((!isValidOperation || isValidOperation.length === 0) && !req.file) {
+    if (req.body.pricingType && !updates.priceType) {
+      updates.priceType = req.body.pricingType;
+    }
+    if (!Object.keys(updates).length && !req.file) {
       return next(new AppError("No valid fields to update", 400));
     }
     if (updates.type) {
@@ -481,7 +480,7 @@ export const updateDeviceById = async (req, res, next) => {
       await redisClient.del(keysToDelete);
     }
 
-    res.status(200).json({ status: "success", data: updatedDevice });
+    res.status(200).json({ success: true, data: updatedDevice });
   } catch (error) {
     next(error);
   }
@@ -526,7 +525,7 @@ export const deleteDeviceById = async (req, res, next) => {
 
     res
       .status(200)
-      .json({ status: "success", message: "Device deleted successfully" });
+      .json({ success: true, message: "Device deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -586,7 +585,7 @@ export const deleteDevicesByBranchId = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: `devices deleted successfully for branch`,
       count: result.count,
     });
@@ -630,7 +629,7 @@ export const getDevicesBySpaceId = async (req, res, next) => {
     ]);
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: devices,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
@@ -652,7 +651,7 @@ export const deleteAllDevices = async (req, res, next) => {
       return next(new AppError("No devices to delete", 404));
     }
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "All devices deleted successfully",
       count: result.count,
     });

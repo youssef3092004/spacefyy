@@ -34,7 +34,7 @@ export const checkSpaceAvailability = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: {
         spaceId: space.id,
         name: space.name,
@@ -59,24 +59,15 @@ export const checkDeviceAvailability = async (req, res, next) => {
     if (!deviceId) return next(new AppError("Device ID is required", 400));
     if (!branchId) return next(new AppError("Branch ID is required", 400));
 
-    const device = await prisma.device.findUnique({
-      where: { id: deviceId },
-      select: {
-        id: true,
-        name: true,
-        space: { select: { branchId: true } },
-        isBusy: true,
-        isActive: true,
-      },
+    const device = await prisma.device.findFirst({
+      where: { id: deviceId, branchId, isDeleted: false },
+      select: { id: true, name: true, isBusy: true, isActive: true },
     });
 
-    if (!device) return next(new AppError("Device not found", 404));
-    if (device.space.branchId !== branchId) {
-      return next(new AppError("Device not found in this branch", 404));
-    }
+    if (!device) return next(new AppError("Device not found in this branch", 404));
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: {
         deviceId: device.id,
         name: device.name,
@@ -98,24 +89,15 @@ export const checkUnitAvailability = async (req, res, next) => {
     if (!unitId) return next(new AppError("Unit ID is required", 400));
     if (!branchId) return next(new AppError("Branch ID is required", 400));
 
-    const unit = await prisma.unit.findUnique({
-      where: { id: unitId },
-      select: {
-        id: true,
-        name: true,
-        device: { select: { space: { select: { branchId: true } } } },
-        isBusy: true,
-        isActive: true,
-      },
+    const unit = await prisma.unit.findFirst({
+      where: { id: unitId, branchId, isDeleted: false },
+      select: { id: true, name: true, isBusy: true, isActive: true },
     });
 
-    if (!unit) return next(new AppError("Unit not found", 404));
-    if (unit.device.space.branchId !== branchId) {
-      return next(new AppError("Unit not found in this branch", 404));
-    }
+    if (!unit) return next(new AppError("Unit not found in this branch", 404));
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: {
         unitId: unit.id,
         name: unit.name,

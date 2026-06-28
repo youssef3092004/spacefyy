@@ -142,7 +142,7 @@ The API runs on `http://localhost:3000/api/v1`.
 
 | Model | Key Fields |
 |---|---|
-| **Visit** | id, branchId, customerId, status (ACTIVE/INVOICED), totalPrice (sessions + orders), startedAt, endedAt, durationMinutes |
+| **Visit** | id, branchId, customerId, status (ACTIVE/INVOICED/CANCELLED), totalPrice (sessions + orders), startedAt, endedAt, durationMinutes, cancelledAt, cancelledById |
 | **Session** | id, branchId, visitId, status (ACTIVE/ENDED/CANCELLED), totalPrice (sum of components), startedAt, endedAt, durationMinutes |
 | **SessionComponent** | id, sessionId, resourceType (SPACE/DEVICE/UNIT/EQUIPMENT), resourceId, priceType, unitPrice (snapshot), quantity, gamesCount, startedAt, endedAt, durationMinutes, totalPrice |
 
@@ -326,8 +326,10 @@ Base URL: `/api/v1`
 | Method | Path | Description |
 |---|---|---|
 | POST | `/start` | Start a visit for a customer at a branch |
-| GET | `/getAllByBranchId/:branchId` | List visits (filter: status ACTIVE/INVOICED) |
+| GET | `/getAllByBranchId/:branchId` | List visits (filter: status ACTIVE / INVOICED / CANCELLED) |
+| GET | `/getById/:visitId` | Get visit with sessions and orders |
 | PATCH | `/close/:visitId` | Close visit, apply discounts, create invoice |
+| PATCH | `/cancel/:visitId` | Cancel visit (only within 15 min, no orders, auto-cancels active sessions) |
 
 ### Sessions — `/sessions`
 
@@ -490,6 +492,30 @@ verifyToken → checkPermission("ACTION-RESOURCE") → checkOwnership(...) → c
    └─ Sets Invoice status = PAID, records paidAt
 ```
 
+### Visit Cancellation
+
+A visit can be cancelled in two ways:
+
+**Manual cancellation** — `PATCH /visits/cancel/:visitId`
+
+Rules:
+- Visit must be `ACTIVE`
+- Must be within **15 minutes** of `startedAt` — returns `400` if the window has passed
+- Visit must have **no orders** — returns `400` if any orders exist
+- Any active sessions are **automatically cancelled** with zero price and resources released
+- Sets Visit → `CANCELLED`, records `cancelledAt` and `cancelledById`
+- Customer can immediately start a new visit after cancellation
+
+**Auto-cancellation** (background job — runs every 5 minutes)
+
+Conditions to trigger:
+- Visit is `ACTIVE`
+- `startedAt` is more than **30 minutes** ago
+- Has **no sessions** (none ever created)
+- Has **no orders**
+
+When triggered, sets Visit → `CANCELLED` with `cancelledAt = now`. No actor is recorded (`cancelledById = null`). Configurable via env vars (see Background Jobs).
+
 ### Session Components & Smart Space Detection
 
 When creating a session with a `deviceId` or `unitId`, the system checks the parent space type:
@@ -542,12 +568,19 @@ Redis is used to cache read-heavy responses. Cache is automatically invalidated 
 
 ## Background Jobs
 
-Defined in [task.js](../task.js) using `node-cron`.
+Defined in `utils/*Cron.js` files using `node-cron`, started in `server.js`.
 
-| Job | Schedule | Description |
-|---|---|---|
-| `storageUsageCron` | Periodic | Snapshots StorageUsage and appends to StorageUsageHistory |
-| `branchStatsCron` | Monthly | Calculates BranchMonthlyStats: new customers, active customers, total revenue, avg spend per customer |
+| Job | File | Default Schedule | Env Override | Description |
+|---|---|---|---|---|
+| `storageUsageCron` | `utils/storageUsageCron.js` | Weekly (Sunday 00:00) | `STORAGE_USAGE_CRON` | Snapshots StorageUsage and appends to StorageUsageHistory |
+| `branchStatsCron` | `utils/branchStatsCron.js` | Monthly | `BRANCH_STATS_CRON` | Calculates BranchMonthlyStats: new customers, active customers, total revenue, avg spend |
+| `visitAutoCancelCron` | `utils/visitAutoCancelCron.js` | Every 5 min (`*/5 * * * *`) | `VISIT_AUTO_CANCEL_CRON` | Auto-cancels ACTIVE visits older than 30 min with no sessions and no orders |
+
+**Disabling a job:** set its enable env var to `false`:
+```env
+ENABLE_STORAGE_USAGE_CRON=false
+ENABLE_VISIT_AUTO_CANCEL_CRON=false
+```
 
 ---
 
@@ -555,6 +588,7 @@ Defined in [task.js](../task.js) using `node-cron`.
 
 | File | Description |
 |---|---|
+| [visit-flow.md](./visit-flow.md) | Full visit lifecycle guide for frontend developers — flow, API calls, errors, and special cases |
 | [pricingSystem.md](./pricingSystem.md) | Deep dive into pricing formulas, rules, and examples |
 | [customer.md](./customer.md) | Customer management, analytics, and discount details |
 | [order.md](./order.md) | Order lifecycle and structure |

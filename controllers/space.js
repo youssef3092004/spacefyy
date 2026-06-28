@@ -133,7 +133,7 @@ export const createSpace = async (req, res, next) => {
     }
 
     res.status(201).json({
-      status: "success",
+      success: true,
       message: "Space created successfully",
       data: newSpace,
       storageUsage,
@@ -256,7 +256,7 @@ export const getSpaceById = async (req, res, next) => {
       : 0;
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: {
         ...space,
         analytics: {
@@ -396,7 +396,7 @@ export const getSpaceByIsActive = async (req, res, next) => {
     }
     res
       .status(200)
-      .json({ status: "success", data: spaces, source: "database" });
+      .json({ success: true, data: spaces, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -430,7 +430,7 @@ export const getSpacesByType = async (req, res, next) => {
     }
     res
       .status(200)
-      .json({ status: "success", data: spaces, source: "database" });
+      .json({ success: true, data: spaces, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -477,7 +477,7 @@ export const deleteSpaceById = async (req, res, next) => {
 
     res
       .status(200)
-      .json({ status: "success", message: "Space deleted successfully" });
+      .json({ success: true, message: "Space deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -520,7 +520,7 @@ export const deleteSpacesByBranchId = async (req, res, next) => {
     });
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: `Deleted spaces Successfully`,
       count: result.count,
     });
@@ -542,7 +542,7 @@ export const deleteAllSpaces = async (req, res, next) => {
       return next(new AppError("No space records to delete", 404));
     }
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "All spaces deleted",
       count: result.count,
     });
@@ -678,7 +678,7 @@ export const updateSpaceById = async (req, res, next) => {
       await redisClient.del(keysToDelete);
     }
 
-    res.status(200).json({ status: "success", data: updatedSpace });
+    res.status(200).json({ success: true, data: updatedSpace });
   } catch (error) {
     next(error);
   }
@@ -710,7 +710,7 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
     // If space is deleted or doesn't exist, return empty list with success
     if (!space || space.isDeleted || space.deletedAt) {
       return res.status(200).json({
-        status: "success",
+        success: true,
         data: [],
         meta: {
           total: 0,
@@ -746,6 +746,15 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
     };
 
     if (status) where.status = status;
+    if (priceType) {
+      where.components = {
+        some: {
+          resourceType: "SPACE",
+          resourceId: spaceId,
+          priceType: String(priceType).toUpperCase(),
+        },
+      };
+    }
 
     // Add date range filtering on createdAt using pre-parsed dates from middleware
     if (req.parsedDates?.startDate || req.parsedDates?.endDate) {
@@ -826,7 +835,7 @@ export const getSpaceHistoryFromSession = async (req, res, next) => {
     }));
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: transformedSessions,
       meta: {
         total: totalSessions,

@@ -12,6 +12,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { startStorageUsageCron } from "./utils/storageUsageCron.js";
 import { startBranchStatsCron } from "./utils/branchStatsCron.js";
+import { startVisitAutoCancelCron } from "./utils/visitAutoCancelCron.js";
 import { autoInvalidateCache } from "./middleware/autoInvalidateCache.js";
 import { Server } from "socket.io";
 import { initializeWebSocketSpaceOverView } from "./controllers/webSocketSpaceOverView.js";
@@ -29,6 +30,7 @@ await connectDB();
 await connectRedis();
 startStorageUsageCron();
 startBranchStatsCron();
+startVisitAutoCancelCron();
 
 app.set("trust proxy", 1);
 

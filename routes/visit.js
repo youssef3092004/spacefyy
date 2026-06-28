@@ -3,6 +3,7 @@ import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import {
+  cancelVisit,
   closeVisit,
   getAllByBranchId,
   getVisitById,
@@ -38,6 +39,13 @@ router.patch(
   checkPermission("UPDATE-VISITS"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
   closeVisit,
+);
+router.patch(
+  "/cancel/:visitId",
+  verifyToken,
+  checkPermission("UPDATE-VISITS"),
+  checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  cancelVisit,
 );
 
 export default router;

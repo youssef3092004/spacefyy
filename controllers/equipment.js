@@ -14,6 +14,9 @@ const EQUIPMENT_TYPES = [
   "PEDALS",
   "MICROPHONE",
   "WEBCAM",
+  "PING_PONG",
+  "BILLIARDO",
+  "BOARD_GAME",
   "OTHER",
 ];
 
@@ -130,7 +133,7 @@ export const createEquipment = async (req, res, next) => {
     await invalidateListCache(branchId);
 
     res.status(201).json({
-      status: "success",
+      success: true,
       message: "Equipment created successfully",
       data: equipment,
     });
@@ -156,7 +159,7 @@ export const getEquipmentById = async (req, res, next) => {
 
     res
       .status(200)
-      .json({ status: "success", data: equipment, source: "database" });
+      .json({ success: true, data: equipment, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -233,7 +236,7 @@ export const getAllByBranchId = async (req, res, next) => {
     ]);
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: equipmentList,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
       source: "database",
@@ -269,7 +272,7 @@ export const getEquipmentByType = async (req, res, next) => {
 
     const equipmentList = await prisma.equipment.findMany({ where });
 
-    res.status(200).json({ status: "success", data: equipmentList });
+    res.status(200).json({ success: true, data: equipmentList });
   } catch (error) {
     next(error);
   }
@@ -370,7 +373,7 @@ export const updateEquipmentById = async (req, res, next) => {
       redisClient.del(`equipment:${equipmentId}`),
     ]);
 
-    res.status(200).json({ status: "success", data: updated });
+    res.status(200).json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }
@@ -405,7 +408,7 @@ export const deleteEquipmentById = async (req, res, next) => {
 
     res
       .status(200)
-      .json({ status: "success", message: "Equipment deleted successfully" });
+      .json({ success: true, message: "Equipment deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -439,7 +442,7 @@ export const deleteEquipmentByBranchId = async (req, res, next) => {
     await invalidateListCache(branchId);
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "Equipment deleted successfully",
       count: result.count,
     });
@@ -470,7 +473,7 @@ export const deleteAllEquipment = async (req, res, next) => {
       return next(new AppError("No equipment to delete", 404));
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "All equipment deleted successfully",
       count: result.count,
     });

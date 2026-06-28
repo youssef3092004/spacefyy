@@ -229,9 +229,22 @@ export const endComponent = async (req, res, next) => {
         branchId: component.branchId,
       });
 
-      // When a DEVICE or UNIT ends, auto-end all active EQUIPMENT in the same session
+      // When a DEVICE or UNIT ends, auto-end EQUIPMENT only if no other DEVICE/UNIT is still active
       const autoEnded = [];
       if (component.resourceType === "DEVICE" || component.resourceType === "UNIT") {
+        const remainingActive = await tx.sessionComponent.count({
+          where: {
+            sessionId: component.sessionId,
+            resourceType: { in: ["DEVICE", "UNIT"] },
+            endedAt: null,
+          },
+        });
+
+        if (remainingActive > 0) {
+          await recalculateSessionTotal(tx, component.sessionId);
+          return { updated: result, autoEndedEquipment: [] };
+        }
+
         const activeEquipment = await tx.sessionComponent.findMany({
           where: { sessionId: component.sessionId, resourceType: "EQUIPMENT", endedAt: null },
           select: componentSelect,

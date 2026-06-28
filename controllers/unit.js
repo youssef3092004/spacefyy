@@ -140,7 +140,7 @@ export const createUnit = async (req, res, next) => {
     await invalidateListCache(branchId);
 
     res.status(201).json({
-      status: "success",
+      success: true,
       message: "Unit created successfully",
       data: unit,
     });
@@ -164,7 +164,7 @@ export const getUnitById = async (req, res, next) => {
 
     if (!unit) return next(new AppError("Unit not found", 404));
 
-    res.status(200).json({ status: "success", data: unit, source: "database" });
+    res.status(200).json({ success: true, data: unit, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -241,7 +241,7 @@ export const getAllByBranchId = async (req, res, next) => {
     ]);
 
     res.status(200).json({
-      status: "success",
+      success: true,
       data: units,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
       source: "database",
@@ -278,7 +278,7 @@ export const getUnitsByType = async (req, res, next) => {
 
     const units = await prisma.unit.findMany({ where });
 
-    res.status(200).json({ status: "success", data: units });
+    res.status(200).json({ success: true, data: units });
   } catch (error) {
     next(error);
   }
@@ -392,7 +392,7 @@ export const updateUnitById = async (req, res, next) => {
       redisClient.del(`unit:${unitId}`),
     ]);
 
-    res.status(200).json({ status: "success", data: updated });
+    res.status(200).json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }
@@ -427,7 +427,7 @@ export const deleteUnitById = async (req, res, next) => {
 
     res
       .status(200)
-      .json({ status: "success", message: "Unit deleted successfully" });
+      .json({ success: true, message: "Unit deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -461,7 +461,7 @@ export const deleteUnitsByBranchId = async (req, res, next) => {
     await invalidateListCache(branchId);
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "Units deleted successfully",
       count: result.count,
     });
@@ -490,7 +490,7 @@ export const deleteAllUnits = async (req, res, next) => {
       return next(new AppError("No units to delete", 404));
 
     res.status(200).json({
-      status: "success",
+      success: true,
       message: "All units deleted successfully",
       count: result.count,
     });
