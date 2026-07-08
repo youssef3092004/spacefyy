@@ -9,6 +9,7 @@ import {
 import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { cacheMiddleware } from "../middleware/cache.js";
+import { autoInvalidateCache } from "../middleware/autoInvalidateCache.js";
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.post(
   "/create",
   verifyToken,
   checkPermission("createOrderItem"),
+  autoInvalidateCache(),
   createOrderItem,
 );
 
@@ -71,6 +73,7 @@ router.patch(
   "/update/:orderItemId/:quantity",
   verifyToken,
   checkPermission("updateOrderItem"),
+  autoInvalidateCache(),
   updateOrderItemQuantity,
 );
 
@@ -85,6 +88,7 @@ router.delete(
   "/delete/:orderItemId",
   verifyToken,
   checkPermission("deleteOrderItem"),
+  autoInvalidateCache(),
   deleteOrderItem,
 );
 

@@ -154,6 +154,15 @@ enum SessionStatus {
 enum OrderStatus {
   OPEN
   COMPLETED
+  INVOICED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
 }
 
 model BusinessSettings {
@@ -181,17 +190,18 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  role                  Role?                  @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  userPermissions       UserPermission[]
-  businesses            Business[]
-  staffProfile          StaffProfile?
-  payrolls              Payroll[]
-  BranchUserPermissions BranchUserPermission[]
-  sessionsCreated       Session[]              @relation("SessionCreatedBy")
-  sessionsEnded         Session[]              @relation("SessionEndedBy")
-  sessionsCanceled      Session[]              @relation("SessionCanceledBy")
-  sessionsDeleted       Session[]              @relation("SessionDeletedBy")
-  visitsCancelled       Visit[]                @relation("VisitCancelledBy")
+  role                   Role?                  @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  userPermissions        UserPermission[]
+  businesses             Business[]
+  staffProfile           StaffProfile?
+  payrolls               Payroll[]
+  BranchUserPermissions  BranchUserPermission[]
+  sessionsCreated        Session[]              @relation("SessionCreatedBy")
+  sessionsEnded          Session[]              @relation("SessionEndedBy")
+  sessionsCanceled       Session[]              @relation("SessionCanceledBy")
+  sessionsDeleted        Session[]              @relation("SessionDeletedBy")
+  visitsCancelled        Visit[]                @relation("VisitCancelledBy")
+  subscriptionsCancelled Subscription[]         @relation("SubscriptionCancelledBy")
 
   isDeleted Boolean   @default(false)
   deletedAt DateTime?
@@ -362,6 +372,7 @@ model Business {
   businessSettings BusinessSettings?
   storageUsage     StorageUsage?
   customers        Customer[]
+  subscriptions    Subscription[]
 
   @@index([ownerId])
 }
@@ -392,6 +403,7 @@ model Branch {
   products              Product[]
   categoryProducts      CategoryProduct[]
   monthlyStats          BranchMonthlyStats[]
+  dailyReports          BranchDailyReport[]
   customerBranches      CustomerBranch[]
   orders                Order[]
   invoices              Invoice[]
@@ -419,6 +431,36 @@ model BranchMonthlyStats {
   @@unique([branchId, month, year])
   @@index([branchId])
   @@index([branchId, year, month])
+}
+
+model BranchDailyReport {
+  id       String   @id @default(uuid())
+  branchId String
+  date     DateTime
+
+  totalRevenue               Decimal @default(0) @db.Decimal(12, 2)
+  sessionRevenue             Decimal @default(0) @db.Decimal(12, 2)
+  productRevenue             Decimal @default(0) @db.Decimal(12, 2)
+  paidInvoiceCount           Int     @default(0)
+  grossRevenueBeforeDiscount Decimal @default(0) @db.Decimal(12, 2)
+  discountGiven              Decimal @default(0) @db.Decimal(12, 2)
+
+  cashTotal           Decimal @default(0) @db.Decimal(12, 2)
+  cardTotal           Decimal @default(0) @db.Decimal(12, 2)
+  instapayTotal       Decimal @default(0) @db.Decimal(12, 2)
+  bankTotal           Decimal @default(0) @db.Decimal(12, 2)
+  unknownPaymentTotal Decimal @default(0) @db.Decimal(12, 2)
+
+  newCustomers    Int @default(0)
+  activeCustomers Int @default(0)
+
+  recordedAt DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, date])
+  @@index([branchId])
+  @@index([branchId, date])
 }
 
 model BlacklistedToken {
@@ -634,12 +676,51 @@ model Plan {
   maxEquipment Int?
   maxUsers     Int?
 
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  businesses Business[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  businesses    Business[]
+  subscriptions Subscription[]
 
   @@index([isActive])
   @@index([billingInterval])
+}
+
+model Subscription {
+  id         String @id @default(uuid())
+  businessId String
+  planId     String
+
+  status SubscriptionStatus @default(ACTIVE)
+
+  // Snapshot plan terms at subscribe-time (Plan.price/billingInterval can change later).
+  priceSnapshot   Decimal         @db.Decimal(10, 2)
+  currency        String          @default("EGP")
+  billingInterval BillingInterval
+
+  startDate          DateTime  @default(now())
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+
+  cancelAtPeriodEnd Boolean   @default(false)
+  cancelReason      String?
+  cancelledAt       DateTime?
+  cancelledById     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan        Plan     @relation(fields: [planId], references: [id])
+  cancelledBy User?    @relation("SubscriptionCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([planId])
+  @@index([status])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([currentPeriodEnd])
+  @@index([cancelledById])
 }
 
 model StorageUsage {
@@ -787,10 +868,11 @@ model Invoice {
   customerDiscountAmount Decimal @default(0) @db.Decimal(10, 2)
   finalAmount            Decimal @default(0) @db.Decimal(12, 2)
 
-  status    InvoiceStatus @default(UNPAID)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  paidAt    DateTime?
+  status        InvoiceStatus  @default(UNPAID)
+  paymentMethod PaymentMethod?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  paidAt        DateTime?
 
   visit  Visit?  @relation(fields: [visitId], references: [id], onDelete: Cascade)
   order  Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)

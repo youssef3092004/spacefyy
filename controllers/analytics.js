@@ -1,15 +1,6 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const getBranchIds = async (businessId, branchId) => {
-  const where = { businessId, ...(branchId ? { id: branchId } : {}) };
-  const branches = await prisma.branch.findMany({ where, select: { id: true } });
-  return branches.map((b) => b.id);
-};
-
-const toNum = (val) => Math.round((Number(val ?? 0) + Number.EPSILON) * 100) / 100;
+import { getBranchIds, toNum } from "../utils/analyticsHelpers.js";
 
 // ─── Controllers ──────────────────────────────────────────────────────────────
 

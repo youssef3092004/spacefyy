@@ -33,11 +33,11 @@ const getRoleIdOrThrow = async (roleName) => {
 
 export const registerOwner = async (req, res, next) => {
   try {
-    // if (req.user.roleName !== "DEVELOPER") {
-    //   return next(
-    //     new AppError("Forbidden: Only DEVELOPER can register owners", 403),
-    //   );
-    // }
+    if (req.user.roleName !== "DEVELOPER") {
+      return next(
+        new AppError("Forbidden: Only DEVELOPER can register owners", 403),
+      );
+    }
     const { name, phone, email, password } = req.body;
 
     const requiredFields = { name, phone, email, password };

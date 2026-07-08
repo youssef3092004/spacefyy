@@ -5,6 +5,10 @@ import { indexCacheKeyByRequest } from "../utils/cacheInvalidation.js";
 export const cacheMiddleware = (keyBuilder, type) => {
   return async (req, res, next) => {
     try {
+      if (req.method !== "GET") {
+        return next();
+      }
+
       let key;
       try {
         key = keyBuilder(req);

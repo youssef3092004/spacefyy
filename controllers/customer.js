@@ -68,6 +68,7 @@ const formatVisitWithOrder = (visit) => {
 
 const createCustomerWithScopedSequence = async ({
   businessId,
+  branchId,
   name,
   phone,
   email,
@@ -96,7 +97,7 @@ const createCustomerWithScopedSequence = async ({
 
         const seqNumber = (lastCustomer?.seqNumber || 0) + 1;
 
-        return tx.customer.create({
+        const customer = await tx.customer.create({
           data: {
             businessId,
             seqNumber,
@@ -116,6 +117,12 @@ const createCustomerWithScopedSequence = async ({
             discountEndTime,
           },
         });
+
+        await tx.customerBranch.create({
+          data: { customerId: customer.id, branchId },
+        });
+
+        return customer;
       });
     } catch (error) {
       const isUniqueConflict =
@@ -143,7 +150,6 @@ export const createCustomer = async (req, res, next) => {
       password,
       notes,
       birthday,
-      branchId,
       hasDiscount = false,
       discountType = "FLAT",
       discountAmount = 0,
@@ -152,6 +158,7 @@ export const createCustomer = async (req, res, next) => {
       discountStartTime,
       discountEndTime,
     } = req.body;
+    const branchId = req.params.branchId;
     const rawTags = req.body.tags;
     const tags =
       rawTags === undefined
@@ -159,7 +166,7 @@ export const createCustomer = async (req, res, next) => {
         : Array.isArray(rawTags)
           ? rawTags
           : [rawTags];
-    const requiredFields = { businessId, name, phone };
+    const requiredFields = { businessId, name, phone, branchId };
 
     for (let i in requiredFields) {
       if (!requiredFields[i]) {
@@ -263,17 +270,13 @@ export const createCustomer = async (req, res, next) => {
       );
     }
 
-    if (branchId) {
-      const branch = await prisma.branch.findUnique({
-        where: { id: branchId },
-        select: { id: true, businessId: true },
-      });
-      if (!branch) return next(new AppError("Branch not found", 404));
-      if (branch.businessId !== businessId)
-        return next(
-          new AppError("Branch does not belong to this business", 400),
-        );
-    }
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { id: true, businessId: true },
+    });
+    if (!branch) return next(new AppError("Branch not found", 404));
+    if (branch.businessId !== businessId)
+      return next(new AppError("Branch does not belong to this business", 400));
 
     const existingPhone = await prisma.customer.findUnique({
       where: {
@@ -305,6 +308,7 @@ export const createCustomer = async (req, res, next) => {
 
     const customer = await createCustomerWithScopedSequence({
       businessId,
+      branchId,
       name,
       phone,
       email,
@@ -320,12 +324,6 @@ export const createCustomer = async (req, res, next) => {
       discountStartTime: discountStartTime || null,
       discountEndTime: discountEndTime || null,
     });
-
-    if (branchId) {
-      await prisma.customerBranch.create({
-        data: { customerId: customer.id, branchId },
-      });
-    }
 
     res.status(201).json({
       success: true,
@@ -898,7 +896,9 @@ export const getCustomerAnalytics = async (req, res, next) => {
         orderRevenue: Math.round(orderRevenue * 100) / 100,
         totalSpend: Math.round((visitRevenue + orderRevenue) * 100) / 100,
         averageSpendPerVisit:
-          visitCount > 0 ? Math.round((visitRevenue / visitCount) * 100) / 100 : 0,
+          visitCount > 0
+            ? Math.round((visitRevenue / visitCount) * 100) / 100
+            : 0,
         lastVisitAt: lastVisit?.startedAt ?? null,
         lastVisitStatus: lastVisit?.status ?? null,
       },

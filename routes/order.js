@@ -59,6 +59,7 @@ router.patch(
   "/complete/:orderId",
   verifyToken,
   checkPermission("updateOrder"),
+  checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
   autoInvalidateCache(),
   completeTakeawayOrder,
 );
@@ -67,6 +68,7 @@ router.delete(
   "/:orderId",
   verifyToken,
   checkPermission("deleteOrder"),
+  checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
   autoInvalidateCache(),
   cancelOrder,
 );
@@ -89,6 +91,7 @@ router.get(
   "/getById/:orderId",
   verifyToken,
   checkPermission("viewOrder"),
+  checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
   cacheMiddleware(
     (req) => `order:${req.params.orderId}`,
     "TTL_BY_ID",
@@ -100,6 +103,7 @@ router.get(
   "/invoice/:orderId",
   verifyToken,
   checkPermission("viewOrder"),
+  checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
   cacheMiddleware(
     (req) => `order:invoice:${req.params.orderId}`,
     "TTL_BY_ID",
@@ -114,7 +118,8 @@ router.get(
   cacheMiddleware(
     (req) => {
       const q = req.query;
-      return `orders:page=${q.page || 1}:limit=${q.limit || 10}:branchId=${q.branchId || "all"}:visitId=${q.visitId || ""}:filter=${q.filter || ""}:search=${q.search || ""}`;
+      const scope = q.branchId || `user:${req.user.userId}`;
+      return `orders:page=${q.page || 1}:limit=${q.limit || 10}:branchId=${scope}:visitId=${q.visitId || ""}:filter=${q.filter || ""}:search=${q.search || ""}`;
     },
     "TTL_LIST",
   ),

@@ -7,7 +7,18 @@
       "Read(//d/Youssef/**)",
       "Bash(New-Item -ItemType Directory -Path \"d:\\\\Youssef\\\\spacefyy\\\\prisma\\\\migrations\\\\20260522000000_add_branchId_to_category\" -Force)",
       "Bash(Out-Null)",
-      "Bash(Write-Host \"Created\")"
+      "Bash(Write-Host \"Created\")",
+      "Bash(node -r dotenv/config \"/c/Users/firefox/AppData/Local/Temp/claude/d--Youssef-spacefyy/5073048b-1972-42b6-a350-4e0892b0057c/scratchpad/inspect-visit.mjs\")",
+      "Bash(node --check controllers/visit.js)",
+      "Bash(node --check controllers/invoice.js)",
+      "Bash(node --check controllers/session.js)",
+      "Bash(node --check controllers/orderItem.js)",
+      "Bash(node --check routes/orderItem.js)",
+      "Bash(node --check controllers/order.js)",
+      "Bash(grep -iE \"\\\\.env|\\\\.log$|seed-output\")",
+      "Bash(node --env-file=.env -e ' *)",
+      "Bash(powershell -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Where-Object { $_.CommandLine -like '\\\\''*server.js*'\\\\'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/ --max-time 3)"
     ]
   }
 }

@@ -122,12 +122,13 @@ The `unitPrice` is a **snapshot** — taken from the resource or pricing rule at
 
 ```
 Staff sends: { deviceId: "ps5-uuid" }
-System detects: PS5 is in a PUBLIC room → adds DEVICE only (no space charge)
+System detects: PS5 is in a PUBLIC room → auto-adds SPACE + DEVICE (space is always charged)
 
 Session: 14:00 → 16:00 (120 min)
-  Component: DEVICE (PS5) unitPrice=30, qty=1 → 30 × 2h = 60 EGP
+  Component: SPACE  (public) unitPrice=20, qty=1 → 20 × 2h = 40 EGP
+  Component: DEVICE (PS5)    unitPrice=30, qty=1 → 30 × 2h = 60 EGP
 ──────────────────────────────────────────────────────────────────
-Session.totalPrice = 60 EGP
+Session.totalPrice = 100 EGP
 ```
 
 ### Scenario 2 — PS Cafe, Private Room, Friend Joins with 4 Controllers
@@ -155,8 +156,9 @@ Visit for Mohamed
     ↳ Session 1 ENDED when Mohamed wants to switch to gaming
 
   Session 2: Play PS alone in public room  (staff sends deviceId: ps5-uuid)
-    System detects: PS5 is in PUBLIC room → adds DEVICE only
-    Component: DEVICE (PS5, 30/hr)   13:00→14:00 = 30 EGP
+    System detects: PS5 is in PUBLIC room → auto-adds SPACE + DEVICE
+    Component: SPACE  (public, 20/hr)  13:00→14:00 = 20 EGP
+    Component: DEVICE (PS5, 30/hr)     13:00→14:00 = 30 EGP
 
   Session 3: Move to private room with friend  (staff sends deviceId: ps5-private-uuid)
     System detects: PS5 is in PRIVATE room → auto-adds SPACE + DEVICE
@@ -276,14 +278,18 @@ A customer discount is only active when ALL of the following are true:
 closeVisit (PATCH /api/v1/visits/close/:visitId)
   body: { discountType?, discountAmount? }
 
-  1. Sum session.totalPrice  (non-cancelled, non-deleted sessions)
-  2. Sum order.totalPrice    (raw, no discount — visit orders only)
-  3. rawTotal = sessions + orders
-  4. afterCustomer = applyDiscount(rawTotal, customerDiscount)
-  5. finalAmount   = applyDiscount(afterCustomer, manualDiscount)
-  6. visit.status → INVOICED
-  7. Invoice upserted with all fields
+  1. Auto-end any still-ACTIVE sessions (price components up to now, release resources)
+  2. Sum session.totalPrice  (non-cancelled, non-deleted sessions)
+  3. Sum order.totalPrice    (raw, no discount — visit orders only)
+  4. rawTotal = sessions + orders
+  5. afterCustomer = applyDiscount(rawTotal, customerDiscount)
+  6. finalAmount   = applyDiscount(afterCustomer, manualDiscount)
+  7. visit.status → INVOICED
+  8. Visit's OPEN order (if any) → COMPLETED
+  9. Invoice upserted with all fields
 ```
+
+`POST /api/v1/invoices/create/:visitId` runs this exact same logic when called on an `ACTIVE` visit — it doesn't require the visit to already be closed. If the visit is already `INVOICED`, it just returns the existing invoice instead of erroring.
 
 ### Takeaway Order Invoice
 
@@ -338,7 +344,7 @@ POST /api/v1/invoices/createOrder/:orderId
 
 ### Request body for `createSession`
 
-There are two modes. Only one can be used per request.
+There are several modes. Only one can be used per request.
 
 **Mode 1 — Smart device mode** (staff picks a device, system auto-resolves the space)
 
@@ -350,9 +356,7 @@ There are two modes. Only one can be used per request.
 }
 ```
 
-The system checks `device.spaceId` and `space.type`:
-- `PUBLIC` or `DESK` → creates session with **DEVICE only**
-- `PRIVATE`, `VIP`, `MEETING`, `OTHER` → creates session with **SPACE + DEVICE**
+If `device.spaceId` is set, the system always creates the session with **SPACE + DEVICE** — every space type is chargeable, including `PUBLIC` and `DESK`. If the device has no `spaceId` (not assigned to any room), only **DEVICE** is added.
 
 **Mode 2 — Smart unit mode** (staff picks a unit, system auto-resolves the space)
 
@@ -364,11 +368,21 @@ The system checks `device.spaceId` and `space.type`:
 }
 ```
 
-The system checks `unit.spaceId` and `space.type`:
-- `PUBLIC` or `DESK` → creates session with **UNIT only**
-- `PRIVATE`, `VIP`, `MEETING`, `OTHER` → creates session with **SPACE + UNIT**
+Same rule as devices: if `unit.spaceId` is set, creates the session with **SPACE + UNIT**. If the unit has no `spaceId`, only **UNIT** is added.
 
-**Mode 3 — Manual mode** (staff explicitly lists all components — for space-only or equipment sessions)
+**Mode 3 — Smart space mode** (staff books the room itself, no device/unit)
+
+```json
+{
+  "visitId": "uuid",
+  "spaceId": "uuid",
+  "startedAt": "2024-01-01T14:00:00Z"
+}
+```
+
+Creates the session with **SPACE only** — never auto-adds the other devices/units sitting in that space.
+
+**Mode 4 — Manual mode** (staff explicitly lists all components — for equipment-only or custom combinations)
 
 ```json
 {
@@ -381,8 +395,7 @@ The system checks `unit.spaceId` and `space.type`:
 ```
 
 Rules:
-- Cannot send `deviceId` and `unitId` together
-- Cannot send `deviceId`/`unitId` and `components` together
+- Provide exactly one of: `deviceId`, `unitId`, `spaceId`, or a non-empty `components[]` — never more than one
 - Equipment is always added via `addComponent` to an existing session, never as a session starter
 
 ### Request body for `addComponent`
@@ -401,18 +414,18 @@ Rules:
 
 ## Space Types and Smart Session Mode
 
-When staff creates a session using `deviceId` or `unitId` (smart mode), the system automatically decides whether to include a space component based on the space type the resource lives in.
+When staff creates a session using `deviceId` or `unitId` (smart mode), the system always adds a `SPACE` component alongside the resource if it belongs to one — every space type is chargeable.
 
-| Space Type | Auto-add to device session? | Reason |
-|---|---|---|
-| `PUBLIC` | No | Free zone — customers pay device rate only |
-| `DESK` | No | Coworking desk — device rate covers the seat |
-| `PRIVATE` | Yes | Chargeable room — customer pays space + device |
-| `VIP` | Yes | Chargeable room |
-| `MEETING` | Yes | Chargeable room |
-| `OTHER` | Yes | Treated as chargeable by default |
+| Space Type | Auto-add to device/unit session? |
+|---|---|
+| `PUBLIC` | Yes |
+| `DESK` | Yes |
+| `PRIVATE` | Yes |
+| `VIP` | Yes |
+| `MEETING` | Yes |
+| `OTHER` | Yes |
 
-If the device or unit has no `spaceId` (not assigned to any room), only that resource's component is added.
+If the device or unit has no `spaceId` (not assigned to any room), only that resource's component is added — there's no space to charge.
 
 Equipment has no `spaceId` and is always added as an add-on to an existing session via `addComponent`, never as a session starter.
 

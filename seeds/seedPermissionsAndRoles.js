@@ -49,6 +49,11 @@ const PERMISSIONS = [
     description: "View private subscription plans",
   },
 
+  { name: "CREATE-SUBSCRIPTIONS", description: "Create/change a business subscription" },
+  { name: "VIEW-SUBSCRIPTIONS", description: "View business subscriptions" },
+  { name: "RENEW-SUBSCRIPTIONS", description: "Renew a business subscription" },
+  { name: "CANCEL-SUBSCRIPTIONS", description: "Cancel a business subscription" },
+
   {
     name: "CREATE-ROLE-PERMISSIONS",
     description: "Assign permissions to roles",

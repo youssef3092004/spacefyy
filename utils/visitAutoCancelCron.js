@@ -2,7 +2,8 @@ import cron from "node-cron";
 import process from "process";
 import { prisma } from "../configs/db.js";
 
-const AUTO_CANCEL_AFTER_MINUTES = 30;
+const AUTO_CANCEL_AFTER_MINUTES =
+  parseInt(process.env.AUTO_CANCEL_AFTER_MINUTES) || 30;
 
 export const runVisitAutoCancel = async () => {
   const cutoff = new Date(Date.now() - AUTO_CANCEL_AFTER_MINUTES * 60 * 1000);
@@ -28,7 +29,12 @@ export const runVisitAutoCancel = async () => {
     try {
       await prisma.visit.update({
         where: { id: visit.id },
-        data: { status: "CANCELLED", endedAt: cancelledAt, cancelledAt, totalPrice: 0 },
+        data: {
+          status: "CANCELLED",
+          endedAt: cancelledAt,
+          cancelledAt,
+          totalPrice: 0,
+        },
       });
       cancelled += 1;
     } catch (err) {
@@ -77,14 +83,18 @@ export const startVisitAutoCancelCron = () => {
   const enabled = process.env.ENABLE_VISIT_AUTO_CANCEL_CRON !== "false";
 
   if (!enabled) {
-    console.log("[VisitAutoCancelCron] Disabled by ENABLE_VISIT_AUTO_CANCEL_CRON=false");
+    console.log(
+      "[VisitAutoCancelCron] Disabled by ENABLE_VISIT_AUTO_CANCEL_CRON=false",
+    );
     return null;
   }
 
   const schedule = process.env.VISIT_AUTO_CANCEL_CRON || "*/5 * * * *";
 
   if (!cron.validate(schedule)) {
-    console.error(`[VisitAutoCancelCron] Invalid cron expression: ${schedule}. Job not started.`);
+    console.error(
+      `[VisitAutoCancelCron] Invalid cron expression: ${schedule}. Job not started.`,
+    );
     return null;
   }
 

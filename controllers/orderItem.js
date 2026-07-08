@@ -1,6 +1,23 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
+import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
+import { applyBothDiscounts, sumItems } from "./order.js";
+
+const FINAL_ORDER_STATUSES = new Set(["COMPLETED", "INVOICED"]);
+
+// Order items live under their own route (/order-items), but every mutation
+// here also changes the parent order's totalPrice/finalPrice/itemCount —
+// so the orders list/detail caches need busting too, not just orderItems'.
+const invalidateOrderRelatedCaches = () => {
+  Promise.all([
+    invalidateCacheByPattern("orders:*"),
+    invalidateCacheByPattern("order:*"),
+    invalidateCacheByPattern("orderItems:*"),
+  ]).catch((error) => {
+    console.error("Order-item cache invalidation failed:", error);
+  });
+};
 
 const parsePositiveInt = (value, fieldName) => {
   const parsed = Number(value);
@@ -15,8 +32,14 @@ const ensureOrderExists = async (orderId) => {
     where: { id: orderId },
     select: {
       id: true,
+      branchId: true,
       visitId: true,
+      status: true,
       totalPrice: true,
+      discountType: true,
+      discountAmount: true,
+      customerDiscountType: true,
+      customerDiscountAmount: true,
       visit: {
         select: {
           id: true,
@@ -30,6 +53,13 @@ const ensureOrderExists = async (orderId) => {
     throw new AppError("Order not found", 404);
   }
 
+  if (FINAL_ORDER_STATUSES.has(order.status)) {
+    throw new AppError(
+      "This order is already finalized. No more items can be added.",
+      409,
+    );
+  }
+
   return order;
 };
 
@@ -40,7 +70,7 @@ const ensureProductUsable = async (productId) => {
       id: true,
       name: true,
       price: true,
-      quantity: true,
+      stock: true,
       isActive: true,
       branchId: true,
     },
@@ -77,7 +107,12 @@ const ensureOrderItemExists = async (orderItemId) => {
       order: {
         select: {
           id: true,
+          status: true,
           totalPrice: true,
+          discountType: true,
+          discountAmount: true,
+          customerDiscountType: true,
+          customerDiscountAmount: true,
         },
       },
     },
@@ -85,6 +120,10 @@ const ensureOrderItemExists = async (orderItemId) => {
 
   if (!orderItem) {
     throw new AppError("Order item not found", 404);
+  }
+
+  if (FINAL_ORDER_STATUSES.has(orderItem.order.status)) {
+    throw new AppError("Cannot modify items in a finalized order", 409);
   }
 
   return orderItem;
@@ -95,12 +134,12 @@ const reserveStock = async (tx, productId, quantity) => {
     where: {
       id: productId,
       isActive: true,
-      quantity: {
+      stock: {
         gte: quantity,
       },
     },
     data: {
-      quantity: {
+      stock: {
         decrement: quantity,
       },
     },
@@ -109,7 +148,7 @@ const reserveStock = async (tx, productId, quantity) => {
   if (result.count === 0) {
     const product = await tx.product.findUnique({
       where: { id: productId },
-      select: { quantity: true, name: true, isActive: true },
+      select: { stock: true, name: true, isActive: true },
     });
 
     if (!product) {
@@ -123,7 +162,7 @@ const reserveStock = async (tx, productId, quantity) => {
     }
 
     throw new AppError(
-      `Insufficient stock for ${product.name}. Available: ${product.quantity}, Requested: ${quantity}`,
+      `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${quantity}`,
       400,
     );
   }
@@ -158,7 +197,13 @@ export const createOrderItem = async (req, res, next) => {
       ensureProductUsable(productId),
     ]);
 
-    if (order.visit.branchId !== product.branchId) {
+    const orderBranchId = order.branchId ?? order.visit?.branchId;
+
+    if (!orderBranchId) {
+      return next(new AppError("Order is not assigned to a branch", 400));
+    }
+
+    if (orderBranchId !== product.branchId) {
       return next(
         new AppError("Product and order must belong to the same branch", 400),
       );
@@ -211,17 +256,22 @@ export const createOrderItem = async (req, res, next) => {
         });
       }
 
+      const allItems = await tx.orderItem.findMany({
+        where: { orderId },
+        select: { totalPrice: true },
+      });
+      const newTotal = sumItems(allItems);
+      const newFinal = applyBothDiscounts(newTotal, order);
+
       await tx.order.update({
         where: { id: orderId },
-        data: {
-          totalPrice: {
-            increment: lineTotal,
-          },
-        },
+        data: { totalPrice: newTotal, finalPrice: newFinal },
       });
 
       return item;
     });
+
+    invalidateOrderRelatedCaches();
 
     return res.status(201).json({
       success: true,
@@ -259,7 +309,6 @@ export const getOrderItemById = async (req, res, next) => {
         unitPrice: true,
         totalPrice: true,
         createdAt: true,
-        updatedAt: true,
         product: {
           select: {
             id: true,
@@ -326,7 +375,6 @@ export const getAllOrderItems = async (req, res, next) => {
           unitPrice: true,
           totalPrice: true,
           createdAt: true,
-          updatedAt: true,
           product: {
             select: {
               id: true,
@@ -397,7 +445,7 @@ export const updateOrderItemQuantity = async (req, res, next) => {
         await tx.product.update({
           where: { id: currentItem.productId },
           data: {
-            quantity: {
+            stock: {
               increment: Math.abs(diff),
             },
           },
@@ -406,8 +454,6 @@ export const updateOrderItemQuantity = async (req, res, next) => {
 
       const unitPrice = Number(currentItem.unitPrice);
       const newLineTotal = unitPrice * newQuantity;
-      const oldLineTotal = Number(currentItem.totalPrice);
-      const totalDiff = newLineTotal - oldLineTotal;
 
       const updatedItem = await tx.orderItem.update({
         where: { id: orderItemId },
@@ -422,7 +468,6 @@ export const updateOrderItemQuantity = async (req, res, next) => {
           quantity: true,
           unitPrice: true,
           totalPrice: true,
-          updatedAt: true,
           product: {
             select: {
               id: true,
@@ -432,17 +477,22 @@ export const updateOrderItemQuantity = async (req, res, next) => {
         },
       });
 
+      const allItems = await tx.orderItem.findMany({
+        where: { orderId: currentItem.orderId },
+        select: { totalPrice: true },
+      });
+      const newTotal = sumItems(allItems);
+      const newFinal = applyBothDiscounts(newTotal, currentItem.order);
+
       await tx.order.update({
         where: { id: currentItem.orderId },
-        data: {
-          totalPrice: {
-            increment: totalDiff,
-          },
-        },
+        data: { totalPrice: newTotal, finalPrice: newFinal },
       });
 
       return updatedItem;
     });
+
+    invalidateOrderRelatedCaches();
 
     return res.status(200).json({
       success: true,
@@ -477,7 +527,7 @@ export const deleteOrderItem = async (req, res, next) => {
       await tx.product.update({
         where: { id: item.productId },
         data: {
-          quantity: {
+          stock: {
             increment: item.quantity,
           },
         },
@@ -487,15 +537,20 @@ export const deleteOrderItem = async (req, res, next) => {
         where: { id: orderItemId },
       });
 
+      const remainingItems = await tx.orderItem.findMany({
+        where: { orderId: item.orderId },
+        select: { totalPrice: true },
+      });
+      const newTotal = sumItems(remainingItems);
+      const newFinal = applyBothDiscounts(newTotal, item.order);
+
       await tx.order.update({
         where: { id: item.orderId },
-        data: {
-          totalPrice: {
-            decrement: Number(item.totalPrice),
-          },
-        },
+        data: { totalPrice: newTotal, finalPrice: newFinal },
       });
     });
+
+    invalidateOrderRelatedCaches();
 
     return res.status(200).json({
       success: true,

@@ -49,3 +49,29 @@ export const checkBranchAccess = async (userId, roleName, branchId, next) => {
     return false;
   }
 };
+
+/**
+ * Get the list of branchIds a non-owner/developer user is allowed to see.
+ * STAFF: branches where they have a staffProfile.
+ * Other roles (ADMIN, CUSTOMER): branches granted via branchUserPermission.
+ *
+ * @param {string} userId
+ * @param {string} roleName
+ * @returns {Promise<string[]>}
+ */
+export const getAccessibleBranchIds = async (userId, roleName) => {
+  if (roleName === "STAFF") {
+    const staffProfiles = await prisma.staffProfile.findMany({
+      where: { userId },
+      select: { branchId: true },
+    });
+    return staffProfiles.map((s) => s.branchId);
+  }
+
+  const branchUserPermissions = await prisma.branchUserPermission.findMany({
+    where: { userId },
+    select: { branchId: true },
+    distinct: ["branchId"],
+  });
+  return branchUserPermissions.map((b) => b.branchId);
+};

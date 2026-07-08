@@ -3,7 +3,7 @@ import { AppError } from "../utils/appError.js";
 
 // Controller: GET /overview/:branchId
 // Returns all spaces (no pagination). For PUBLIC spaces, includes devices and units.
-// Also returns metrics: activeVisits, spacesOccupied, todayOrders, longestSessionSeconds
+// Also returns metrics: activeVisits, spacesOccupied, spacesTotal, todayOrders, longestSessionSeconds
 export const buildSpacesOverviewData = async (branchId) => {
   if (!branchId) throw new AppError("Branch ID is required", 400);
 
@@ -77,6 +77,7 @@ export const buildSpacesOverviewData = async (branchId) => {
     prisma.sessionComponent.findMany({
       where: {
         branchId,
+        endedAt: null,
         session: { status: "ACTIVE", deletedAt: null },
       },
       select: {
@@ -86,6 +87,7 @@ export const buildSpacesOverviewData = async (branchId) => {
           select: {
             visit: {
               select: {
+                id: true,
                 customer: {
                   select: {
                     id: true,
@@ -102,6 +104,7 @@ export const buildSpacesOverviewData = async (branchId) => {
       where: {
         branchId,
         deletedAt: null,
+        status: { not: "CANCELLED" },
         OR: [
           { startedAt: { gte: startOfDay, lte: endOfDay } },
           { endedAt: { gte: startOfDay, lte: endOfDay } },
@@ -111,19 +114,17 @@ export const buildSpacesOverviewData = async (branchId) => {
     }),
   ]);
 
-  const occupiedSpaceIds = new Set(
-    sessionComponentsActive
-      .filter((c) => c.resourceType === "SPACE")
-      .map((c) => c.resourceId),
-  );
-
   const activeCustomerByResource = new Map();
+  const activeVisitByResource = new Map();
   for (const component of sessionComponentsActive) {
-    const customer = component.session?.visit?.customer || null;
-    if (!customer) continue;
+    const visit = component.session?.visit;
+    if (!visit) continue;
     const key = `${component.resourceType}:${component.resourceId}`;
-    if (!activeCustomerByResource.has(key)) {
-      activeCustomerByResource.set(key, customer);
+    if (visit.customer && !activeCustomerByResource.has(key)) {
+      activeCustomerByResource.set(key, visit.customer);
+    }
+    if (!activeVisitByResource.has(key)) {
+      activeVisitByResource.set(key, visit.id);
     }
   }
 
@@ -135,6 +136,9 @@ export const buildSpacesOverviewData = async (branchId) => {
     activeCustomerByResource.get(`${resourceType}:${resourceId}`) ||
     emptyCustomer;
 
+  const getActiveVisitId = (resourceType, resourceId) =>
+    activeVisitByResource.get(`${resourceType}:${resourceId}`) || null;
+
   const assembledSpaces = spacesBasic.map((s) => {
     if (s.type === "PUBLIC" && publicMap.has(s.id)) {
       const pub = publicMap.get(s.id);
@@ -143,20 +147,31 @@ export const buildSpacesOverviewData = async (branchId) => {
         devices: (pub.devices || []).map((device) => ({
           ...device,
           ...(device.isBusy
-            ? { customer: getActiveCustomer("DEVICE", device.id) }
+            ? {
+                customer: getActiveCustomer("DEVICE", device.id),
+                visitId: getActiveVisitId("DEVICE", device.id),
+              }
             : {}),
         })),
         units: (pub.units || []).map((unit) => ({
           ...unit,
           ...(unit.isBusy
-            ? { customer: getActiveCustomer("UNIT", unit.id) }
+            ? {
+                customer: getActiveCustomer("UNIT", unit.id),
+                visitId: getActiveVisitId("UNIT", unit.id),
+              }
             : {}),
         })),
       };
     }
     return {
       ...s,
-      ...(s.isBusy ? { customer: getActiveCustomer("SPACE", s.id) } : {}),
+      ...(s.isBusy
+        ? {
+            customer: getActiveCustomer("SPACE", s.id),
+            visitId: getActiveVisitId("SPACE", s.id),
+          }
+        : {}),
     };
   });
 
@@ -169,10 +184,31 @@ export const buildSpacesOverviewData = async (branchId) => {
     if (duration > longestSessionSeconds) longestSessionSeconds = duration;
   }
 
+  // ── Capacity metrics (occupied / total) ────────────────────────────
+  // A non-PUBLIC space is itself one bookable unit (tracked by space.isBusy).
+  // A PUBLIC space contributes its inner devices + units as the bookable
+  // units, and each one is counted (and marked occupied) by its own isBusy.
+  let spacesTotal = 0;
+  let spacesOccupied = 0;
+  for (const s of assembledSpaces) {
+    if (s.type === "PUBLIC") {
+      const devices = s.devices ?? [];
+      const units = s.units ?? [];
+      spacesTotal += devices.length + units.length;
+      spacesOccupied +=
+        devices.filter((d) => d.isBusy).length +
+        units.filter((u) => u.isBusy).length;
+    } else {
+      spacesTotal += 1;
+      if (s.isBusy) spacesOccupied += 1;
+    }
+  }
+
   return {
     analytics: {
       activeVisits,
-      spacesOccupied: occupiedSpaceIds.size,
+      spacesOccupied,
+      spacesTotal,
       todayOrders,
       longestSessionSeconds,
     },

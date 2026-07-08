@@ -63,7 +63,7 @@ router.patch(
 );
 
 router.patch(
-  "/end/:branchId/:sessionId",
+  "/end/:sessionId",
   verifyToken,
   checkPermission("UPDATE-SESSIONS"),
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
@@ -71,7 +71,7 @@ router.patch(
 );
 
 router.patch(
-  "/cancel/:branchId/:sessionId",
+  "/cancel/:sessionId",
   verifyToken,
   checkPermission("UPDATE-SESSIONS"),
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
@@ -79,7 +79,7 @@ router.patch(
 );
 
 router.delete(
-  "/delete/:branchId/:sessionId",
+  "/delete/:sessionId",
   verifyToken,
   checkPermission("DELETE-SESSIONS"),
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),

@@ -21,12 +21,13 @@ Spacefyy is a multi-tenant backend API for managing branch-based businesses — 
   - [Pricing](#pricing)
   - [Products & Categories](#products--categories)
   - [Staff & Payroll](#staff--payroll)
-  - [Analytics](#analytics)
-  - [Plans & Storage](#plans--storage)
+  - [Analytics & Reports](#analytics--reports)
+  - [Plans, Subscriptions & Storage](#plans-subscriptions--storage)
 - [Pricing System](#pricing-system)
 - [API Base URL](#api-base-url)
 - [Security](#security)
 - [Background Jobs](#background-jobs)
+- [Maintenance Scripts](#maintenance-scripts)
 - [Environment Variables](#environment-variables)
 
 ---
@@ -91,6 +92,8 @@ JWT-based authentication. Every protected route requires a valid token. The syst
 
 Permissions can be granted at the role level or overridden per user at the branch level via `BranchUserPermission`.
 
+`GET /users/getMe` returns the authenticated user plus a `userType` (their role name) and a `branchId` — the latter is resolved from the user's staff profile for `STAFF` and `ADMIN` (their assigned branch), and is `null` for `OWNER`/`DEVELOPER`.
+
 ---
 
 ### Business & Branch Management
@@ -118,6 +121,12 @@ Every resource has:
 - An `isBusy` flag — automatically updated when sessions start and end
 
 Pricing rules can override any resource's default price with time-range constraints, player count conditions, and priority levels.
+
+**Space capacity:** only **PUBLIC** spaces hold multiple resources and take a `capacity` from the client. Every other space type (PRIVATE, MEETING, VIP, DESK, OTHER) is **single-use** — its `capacity` is always `1` and any client-supplied value is ignored on create/update.
+
+**Live overview:** `GET /spaces/overview/:branchId` returns the whole branch floor — every space (with the devices/units inside PUBLIC spaces), each resource's busy/free state, the `customer` and `visitId` occupying it, and dashboard metrics: `activeVisits`, `spacesOccupied` / `spacesTotal`, `todayOrders`, and `longestSessionSeconds` (plus a pre-formatted `longestSession`, e.g. `"2h 25m"`). Updates are pushed live over Socket.IO — clients don't poll.
+
+→ See [docs/space-overview.md](docs/space-overview.md) for the full overview + real-time reference.
 
 ---
 
@@ -183,6 +192,8 @@ Orders cover products (food, drinks, merchandise) sold at a branch. There are tw
 
 Stock is managed automatically — decremented when items are added, restored when items are removed or an order is cancelled.
 
+Every order response includes an `invoice` summary so the frontend can show its billing state at a glance: `{ isInvoiced, invoiceId, status }` — `status` is `null` until the order is invoiced, then `UNPAID` / `PAID`. Paying or deleting an invoice invalidates the cached order lists so the state stays fresh.
+
 → See [docs/order.md](docs/order.md) for the full order API reference.
 
 ---
@@ -198,6 +209,8 @@ An invoice is generated when a visit is closed or when a takeaway order is compl
 - `finalAmount` — what the customer actually pays
 
 **Invoice statuses:** `UNPAID` → `PAID`
+
+**Payment method** — when marking an invoice as paid (`PATCH /invoices/pay/:visitId` or `PATCH /invoices/payById/:invoiceId`), the body must include a `paymentMethod` (`CASH`, `CARD`, `INSTAPAY`, `BANK`) — paying without it returns `400`. It is stored on the invoice and powers the payment breakdown in the [Reports](#analytics--reports) module. Invoices paid before this field existed are reported as `UNKNOWN`.
 
 → See the [Pricing System](docs/pricingSystem.md) for the full discount calculation flow.
 
@@ -227,7 +240,7 @@ Staff members have profiles linked to a branch with a base salary, hire date, po
 
 ---
 
-### Analytics
+### Analytics & Reports
 
 Analytics are available at the branch and customer level:
 
@@ -237,11 +250,27 @@ Analytics are available at the branch and customer level:
 
 Historical branch stats are persisted monthly by a background cron job so trend data is always available without expensive live queries.
 
+**Financial reports** (`/api/v1/reports`) go further — full owner-facing reports for any date range, at branch level or business-wide with a per-branch comparison breakdown:
+
+- **Income** — total revenue (what customers actually paid), session vs. product split, daily/weekly trend, and a payment method breakdown (Cash / Card / InstaPay / Bank).
+- **Outstanding** — unpaid invoice count and total, with an overdue bucket (> 14 days).
+- **Payroll cost** — paid payroll as an expense proxy, plus `netAfterPayroll` (deliberately not called "profit" — rent/utilities/inventory costs aren't tracked yet). Visible to OWNER/ADMIN/DEVELOPER only.
+- **Customers, discounts, top products, low-stock products.**
+- **Rule-based insights** — automatic `info`/`warning`/`critical` flags: revenue drops vs. the previous period, uncollected invoices piling up, heavy discounting, low stock, overdue payroll, and underperforming branches.
+
+Requesting a single day (`startDate=endDate=today`) doubles as the **Daily Closing Report**: net profit for the day, payment breakdown, branch name. Past days are served from `BranchDailyReport` snapshots persisted nightly by a cron, with automatic live fallback when snapshots have gaps.
+
+→ See [docs/reports.md](docs/reports.md) for the full reports reference.
+
 ---
 
-### Plans & Storage
+### Plans, Subscriptions & Storage
 
 Every business subscribes to a plan (`FREE`, `PRO`, `ENTERPRISE`) that sets limits on how many branches, spaces, devices, units, equipment, staff, and users are allowed. Storage usage is tracked in real time and compared against plan limits when new resources are created.
+
+A business's billing history is tracked as `Subscription` rows — one per plan period, never mutated in place. A new plan (or a renewal) always adds a new row instead of editing the old one, so `GET /subscriptions/getAll/:businessId` is a full audit trail. Lifecycle: `TRIALING`/`ACTIVE` → `PAST_DUE` (grace period after the billing period lapses with no renewal) → `EXPIRED` (business is downgraded back to the default free/public plan), or → `CANCELLED` (immediately, or deferred to the end of the current period). Creating a business auto-creates its first subscription; billing itself is manual (a developer confirms payment and calls `create`/`renew` — there's no payment gateway).
+
+→ See [docs/subscription.md](docs/subscription.md) for the full Plans + Subscriptions API reference.
 
 ---
 
@@ -293,7 +322,9 @@ All endpoints are versioned under:
 | `/api/v1/staff` | Staff profiles |
 | `/api/v1/payroll` | Payroll |
 | `/api/v1/analytics` | Analytics |
+| `/api/v1/reports` | Branch & business financial reports |
 | `/api/v1/plans` | Plans |
+| `/api/v1/subscriptions` | Subscriptions |
 | `/api/v1/storage-usage` | Storage usage |
 
 ---
@@ -312,12 +343,27 @@ All endpoints are versioned under:
 
 ## Background Jobs
 
-Two cron jobs run on a schedule:
+Five cron jobs run on a schedule (all configurable via env cron expressions):
 
-| Job | What it does |
+| Job | Default schedule | What it does |
+|---|---|---|
+| `branchStatsCron` | Monthly | Persists monthly branch statistics (revenue, customer counts) so analytics queries stay fast |
+| `dailyReportCron` | Daily (00:10 UTC) | Persists yesterday's per-branch financial snapshot (`BranchDailyReport`: revenue splits, payment breakdown, discounts, customer counts) so reports over long ranges stay fast |
+| `storageUsageCron` | Weekly | Recalculates and persists current resource counts per business for plan limit enforcement |
+| `visitAutoCancelCron` | Every 5 min | Cancels stale `ACTIVE` visits that have no sessions and no orders after a timeout (`AUTO_CANCEL_AFTER_MINUTES`, default 30) |
+| `subscriptionCron` | Hourly | Moves lapsed subscriptions `ACTIVE → PAST_DUE → EXPIRED` (or `→ CANCELLED` if deferred cancellation was requested), after a grace period (`SUBSCRIPTION_GRACE_DAYS`, default 3) |
+
+> Cron jobs require a long-running server process and do not run on Vercel serverless functions.
+
+---
+
+## Maintenance Scripts
+
+One-off scripts under `scripts/`, run with `node --env-file=.env scripts/<name>.js`:
+
+| Script | What it does |
 |---|---|
-| `branchStatsCron` | Persists monthly branch statistics (revenue, customer counts) so analytics queries stay fast |
-| `storageUsageCron` | Recalculates and persists current resource counts per business for plan limit enforcement |
+| `reconcileResourceState.js` | Recomputes every space/device/unit's `isBusy` (and normalizes non-PUBLIC space `capacity` to `1`) from the live sessions, clearing any drift between the data and the live overview. **Dry-run by default**; pass `--apply` to write, `--branch=<id>` to scope. |
 
 ---
 

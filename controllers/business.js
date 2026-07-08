@@ -4,6 +4,10 @@ import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
 import { initializeStorageUsage } from "../utils/storageUsage.js";
 import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
+import {
+  resolveFallbackPlanId,
+  createSubscriptionForBusiness,
+} from "../utils/subscription.js";
 
 const resolvePlanId = async (requestedPlanId) => {
   if (requestedPlanId) {
@@ -19,23 +23,7 @@ const resolvePlanId = async (requestedPlanId) => {
     return plan.id;
   }
 
-  const fallbackPlan = await prisma.plan.findFirst({
-    where: {
-      isActive: true,
-      isPublic: true,
-    },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-
-  if (!fallbackPlan) {
-    throw new AppError(
-      "No active public plan found. Create a plan first or provide a valid planId",
-      400,
-    );
-  }
-
-  return fallbackPlan.id;
+  return resolveFallbackPlanId();
 };
 
 export const createBusiness = async (req, res, next) => {
@@ -71,6 +59,11 @@ export const createBusiness = async (req, res, next) => {
       },
     });
 
+    const subscription = await createSubscriptionForBusiness({
+      businessId: newBusiness.id,
+      planId: validPlanId,
+    });
+
     await invalidateCacheByPattern("businesses*");
     await invalidateCacheByPattern(`business:${newBusiness.id}`);
 
@@ -80,6 +73,7 @@ export const createBusiness = async (req, res, next) => {
         business: newBusiness,
         settings: newSettings,
         storage: storageUsage,
+        subscription,
       },
       source: "database",
     });

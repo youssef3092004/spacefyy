@@ -45,7 +45,7 @@ export const createSpace = async (req, res, next) => {
       priceType,
       price,
     } = req.body;
-    const requiredFields = { branchId, name, type, capacity };
+    const requiredFields = { branchId, name, type };
     for (let i in requiredFields) {
       if (!requiredFields[i]) {
         return next(
@@ -64,11 +64,25 @@ export const createSpace = async (req, res, next) => {
     }
 
     const normalizedType = fixType(type);
-    const normalizedCapacity = Number(capacity);
     const normalizedIsActive =
       isActive !== undefined ? parseBooleanInput(isActive, "isActive") : true;
-    if (!Number.isInteger(normalizedCapacity) || normalizedCapacity <= 0) {
-      return next(new AppError("capacity must be a positive integer", 400));
+
+    // Only PUBLIC spaces hold multiple resources (devices/units) and accept a
+    // capacity from the client. Every other type is single-use: capacity is
+    // always 1 and any client-supplied value is ignored.
+    let normalizedCapacity;
+    if (normalizedType === "PUBLIC") {
+      if (capacity === undefined || capacity === null || capacity === "") {
+        return next(
+          new AppError("capacity is required for PUBLIC spaces", 400),
+        );
+      }
+      normalizedCapacity = Number(capacity);
+      if (!Number.isInteger(normalizedCapacity) || normalizedCapacity <= 0) {
+        return next(new AppError("capacity must be a positive integer", 400));
+      }
+    } else {
+      normalizedCapacity = 1;
     }
 
     const normalizedPriceType = String(priceType || "PER_HOUR").toUpperCase();
@@ -642,6 +656,18 @@ export const updateSpaceById = async (req, res, next) => {
     }
     if (!existingSpace || existingSpace === 0) {
       return next(new AppError("Space not found", 404));
+    }
+
+    // Non-PUBLIC spaces are single-use: capacity is always 1 and any
+    // client-supplied capacity is ignored. Keep availableNumber within [0, 1].
+    const effectiveType = updates.type ?? existingSpace.type;
+    if (effectiveType !== "PUBLIC") {
+      updates.capacity = 1;
+      const currentAvailable =
+        updates.availableNumber !== undefined
+          ? updates.availableNumber
+          : existingSpace.availableNumber;
+      updates.availableNumber = Math.min(Math.max(currentAvailable, 0), 1);
     }
 
     // Handle image upload if file is provided

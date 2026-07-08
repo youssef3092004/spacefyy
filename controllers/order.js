@@ -1,7 +1,14 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
-import { applyDiscount, resolveCustomerDiscount } from "../utils/discountUtils.js";
+import {
+  applyDiscount,
+  resolveCustomerDiscount,
+} from "../utils/discountUtils.js";
+import {
+  checkBranchAccess,
+  getAccessibleBranchIds,
+} from "../utils/checkBranchAccess.js";
 import { randomUUID } from "crypto";
 
 // ─── Prisma include shape ─────────────────────────────────────────────────────
@@ -22,10 +29,14 @@ export const ORDER_INCLUDE = {
   customer: {
     select: { id: true, name: true },
   },
+  invoice: {
+    select: { id: true, status: true },
+  },
 };
 
 const ORDER_LIST_INCLUDE = {
   _count: { select: { orderItems: true } },
+  invoice: { select: { id: true, status: true } },
 };
 
 const INVOICE_INCLUDE = {
@@ -38,15 +49,25 @@ const INVOICE_INCLUDE = {
   },
 };
 
+const FINAL_ORDER_STATUSES = new Set(["COMPLETED", "INVOICED"]);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const applyBothDiscounts = (price, order) => {
-  let result = applyDiscount(price, order.customerDiscountType, Number(order.customerDiscountAmount));
-  result = applyDiscount(result, order.discountType, Number(order.discountAmount));
+export const applyBothDiscounts = (price, order) => {
+  let result = applyDiscount(
+    price,
+    order.customerDiscountType,
+    Number(order.customerDiscountAmount),
+  );
+  result = applyDiscount(
+    result,
+    order.discountType,
+    Number(order.discountAmount),
+  );
   return result;
 };
 
-const sumItems = (items) =>
+export const sumItems = (items) =>
   items.reduce((sum, i) => sum + Number(i.totalPrice), 0);
 
 const enrichItems = async (items) => {
@@ -81,7 +102,6 @@ const enrichItems = async (items) => {
   return enriched;
 };
 
-
 const formatOrderItem = (item) => ({
   id: item.id,
   quantity: item.quantity,
@@ -95,6 +115,12 @@ const formatOrderItem = (item) => ({
         price: Number(item.product.price),
       }
     : null,
+});
+
+const formatInvoiceSummary = (invoice) => ({
+  isInvoiced: !!invoice,
+  invoiceId: invoice?.id ?? null,
+  status: invoice?.status ?? null,
 });
 
 export const formatOrder = (order) => ({
@@ -127,6 +153,7 @@ export const formatOrder = (order) => ({
   orderItems: Array.isArray(order.orderItems)
     ? order.orderItems.map(formatOrderItem)
     : [],
+  invoice: formatInvoiceSummary(order.invoice),
   createdAt: order.createdAt,
   updatedAt: order.updatedAt,
 });
@@ -155,6 +182,7 @@ const formatOrderSummary = (order) => ({
   totalPrice: Number(order.totalPrice),
   finalPrice: Number(order.finalPrice),
   itemCount: order._count?.orderItems ?? 0,
+  invoice: formatInvoiceSummary(order.invoice),
   createdAt: order.createdAt,
   updatedAt: order.updatedAt,
 });
@@ -166,7 +194,11 @@ const formatInvoice = (order) => ({
   visitId: order.visitId ?? null,
   status: order.status,
   branch: order.branch
-    ? { id: order.branch.id, name: order.branch.name, address: order.branch.address }
+    ? {
+        id: order.branch.id,
+        name: order.branch.name,
+        address: order.branch.address,
+      }
     : null,
   customer: order.customer
     ? {
@@ -188,7 +220,9 @@ const formatInvoice = (order) => ({
   },
   totalPrice: Number(order.totalPrice),
   finalPrice: Number(order.finalPrice),
-  items: Array.isArray(order.orderItems) ? order.orderItems.map(formatOrderItem) : [],
+  items: Array.isArray(order.orderItems)
+    ? order.orderItems.map(formatOrderItem)
+    : [],
   createdAt: order.createdAt,
   updatedAt: order.updatedAt,
 });
@@ -255,10 +289,10 @@ export const addOrderItems = async (req, res, next) => {
           customerDiscountAmount: true,
         },
       });
-      if (existing?.status === "COMPLETED") {
+      if (FINAL_ORDER_STATUSES.has(existing?.status)) {
         return next(
           new AppError(
-            "This order is already completed. No more items can be added.",
+            "This order is already finalized. No more items can be added.",
             409,
           ),
         );
@@ -449,9 +483,9 @@ export const updateItemQuantity = async (req, res, next) => {
     });
 
     if (!item) return next(new AppError("Order item not found", 404));
-    if (item.order.status === "COMPLETED") {
+    if (FINAL_ORDER_STATUSES.has(item.order.status)) {
       return next(
-        new AppError("Cannot modify items in a completed order", 409),
+        new AppError("Cannot modify items in a finalized order", 409),
       );
     }
 
@@ -543,9 +577,9 @@ export const removeItem = async (req, res, next) => {
     });
 
     if (!item) return next(new AppError("Order item not found", 404));
-    if (item.order.status === "COMPLETED") {
+    if (FINAL_ORDER_STATUSES.has(item.order.status)) {
       return next(
-        new AppError("Cannot remove items from a completed order", 409),
+        new AppError("Cannot remove items from a finalized order", 409),
       );
     }
 
@@ -593,8 +627,9 @@ export const completeOrder = async (req, res, next) => {
     });
 
     if (!order) return next(new AppError("No order found for this visit", 404));
-    if (order.status === "COMPLETED")
-      return next(new AppError("Order is already completed", 409));
+    if (FINAL_ORDER_STATUSES.has(order.status)) {
+      return next(new AppError("Order is already finalized", 409));
+    }
 
     const updated = await prisma.order.update({
       where: { id: order.id },
@@ -620,11 +655,20 @@ export const cancelOrder = async (req, res, next) => {
       where: { id: orderId },
       select: {
         id: true,
+        status: true,
         orderItems: { select: { productId: true, quantity: true } },
       },
     });
 
     if (!order) return next(new AppError("Order not found", 404));
+    if (FINAL_ORDER_STATUSES.has(order.status)) {
+      return next(
+        new AppError(
+          "Cannot cancel an order that is already completed or invoiced",
+          409,
+        ),
+      );
+    }
 
     await prisma.$transaction(async (tx) => {
       for (const item of order.orderItems) {
@@ -662,10 +706,31 @@ export const getAllOrders = async (req, res, next) => {
   try {
     const { page, limit, skip, sort, order } = pagination(req);
     const { visitId, branchId, filter, search } = req.query ?? {};
+    const { userId, roleName } = req.user;
 
     const where = {};
     if (visitId?.trim()) where.visitId = visitId.trim();
-    if (branchId?.trim()) where.branchId = branchId.trim();
+
+    if (branchId?.trim()) {
+      const hasAccess = await checkBranchAccess(
+        userId,
+        roleName,
+        branchId.trim(),
+        next,
+      );
+      if (!hasAccess) {
+        return next(
+          new AppError("You do not have access to this branch", 403),
+        );
+      }
+      where.branchId = branchId.trim();
+    } else if (roleName !== "OWNER" && roleName !== "DEVELOPER") {
+      const accessibleBranchIds = await getAccessibleBranchIds(
+        userId,
+        roleName,
+      );
+      where.branchId = { in: accessibleBranchIds };
+    }
 
     if (filter === "true") where.visitId = null;
     else if (filter === "false") where.visitId = { not: null };
@@ -714,8 +779,8 @@ export const completeTakeawayOrder = async (req, res, next) => {
         ),
       );
     }
-    if (order.status === "COMPLETED") {
-      return next(new AppError("Order is already completed", 409));
+    if (FINAL_ORDER_STATUSES.has(order.status)) {
+      return next(new AppError("Order is already finalized", 409));
     }
 
     const updated = await prisma.order.update({

@@ -337,16 +337,30 @@ export const getMe = async (req, res, next) => {
           },
         },
         businesses: true,
+        staffProfile: {
+          select: { branchId: true },
+        },
       },
     });
     if (!user) {
       return next(new AppError("User not found", 404));
     }
     // eslint-disable-next-line no-unused-vars
-    const userWithoutPassword = (({ password, ...rest }) => rest)(user);
+    const { password, staffProfile, ...userWithoutPassword } = user;
+
+    const userType = user.role?.name ?? null;
+    const branchId =
+      userType === "STAFF" || userType === "ADMIN"
+        ? (staffProfile?.branchId ?? null)
+        : null;
+
     res.status(200).json({
       success: true,
-      data: userWithoutPassword,
+      data: {
+        ...userWithoutPassword,
+        userType,
+        branchId,
+      },
       source: "database",
     });
   } catch (error) {

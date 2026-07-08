@@ -22,7 +22,7 @@ import { upload } from "../configs/multer.js";
 const router = Router();
 
 router.post(
-  "/create",
+  "/create/:branchId",
   verifyToken,
   upload.none(),
   checkPermission("CREATE_CUSTOMER"),

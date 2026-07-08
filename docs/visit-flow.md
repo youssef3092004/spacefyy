@@ -108,7 +108,9 @@ POST /api/v1/sessions/create/:branchId
   "deviceId": "..."      ← OR "unitId": "..."  (pick one)
 }
 ```
-The backend will automatically detect the parent space and include all devices/units in it as components. Use this when the customer sits at a specific device or unit.
+The backend automatically detects the parent space and, if the device/unit belongs to one, adds a `SPACE` component alongside the one device/unit you picked — every space type is chargeable, including `PUBLIC`/`DESK`. It never adds the other devices/units sharing that room. If the resource has no `spaceId` (not assigned to any room), only the picked device/unit is added. Use this when the customer sits at a specific device or unit.
+
+You can also pass `spaceId` instead of `deviceId`/`unitId` to book the room alone, with no device/unit attached.
 
 **Body — Manual mode:**
 ```json
@@ -123,7 +125,7 @@ The backend will automatically detect the parent space and include all devices/u
 Use this when you want full control over which resources to charge.
 
 **Rules:**
-- You must pass exactly one of: `deviceId`, `unitId`, or `components[]` — never two at once
+- You must pass exactly one of: `deviceId`, `unitId`, `spaceId`, or `components[]` — never more than one
 - The visit must be `ACTIVE`
 - The customer must not be blocked
 

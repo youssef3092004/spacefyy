@@ -1,8 +1,19 @@
 import { prisma } from "../configs/db.js";
 import { redisClient } from "../configs/redis.js";
 import { Router } from "express";
+import { verifyToken } from "../middleware/auth.js";
+import { AppError } from "../utils/appError.js";
 
 const router = Router();
+
+const requireDeveloper = (req, res, next) => {
+  if (req.user?.roleName !== "DEVELOPER") {
+    return next(
+      new AppError("Forbidden: Only DEVELOPER can perform this action", 403),
+    );
+  }
+  next();
+};
 
 export const PERMISSIONS = [
   { name: "REGISTER-OWNER", description: "Register business owner" },
@@ -52,6 +63,11 @@ export const PERMISSIONS = [
     name: "VIEW-PRIVATE-PLANS",
     description: "View private subscription plans",
   },
+
+  { name: "CREATE-SUBSCRIPTIONS", description: "Create/change a business subscription" },
+  { name: "VIEW-SUBSCRIPTIONS", description: "View business subscriptions" },
+  { name: "RENEW-SUBSCRIPTIONS", description: "Renew a business subscription" },
+  { name: "CANCEL-SUBSCRIPTIONS", description: "Cancel a business subscription" },
 
   {
     name: "CREATE-ROLE-PERMISSIONS",
@@ -311,9 +327,9 @@ const assignPermissionsToRole = async (roleName, permissionNames) => {
   }
 };
 
-router.post("/seed", createPermissionsBulk);
+router.post("/seed", verifyToken, requireDeveloper, createPermissionsBulk);
 
-router.post("/assign/staff", async (req, res, next) => {
+router.post("/assign/staff", verifyToken, requireDeveloper, async (req, res, next) => {
   try {
     await assignPermissionsToRole("STAFF", STAFF_PERMISSIONS);
 

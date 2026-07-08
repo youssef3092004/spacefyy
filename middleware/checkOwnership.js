@@ -50,14 +50,17 @@ export const checkOwnership = ({
                 ? { id: true, branchId: true }
                 : model === "visit"
                   ? { id: true, branchId: true }
-                  : scope === "user"
-                    ? { userId: true, branchId: true }
-                    : { branchId: true };
+                  : model === "user"
+                    ? { id: true }
+                    : scope === "user"
+                      ? { userId: true, branchId: true }
+                      : { branchId: true };
 
       // All standard models use "id" as primary key for findUnique
       const idModels = new Set([
         "branch", "business", "session", "sessionComponent",
         "visit", "device", "space", "unit", "equipment", "product", "categoryProduct",
+        "order", "invoice", "user",
       ]);
       const whereField = idModels.has(model) ? "id" : paramId;
 
@@ -78,7 +81,10 @@ export const checkOwnership = ({
 
       // 🔹 USER ownership
       if (scope === "user") {
-        const ownerUserId = resource.userId || resource.createdById;
+        const ownerUserId =
+          model === "user"
+            ? resource.id
+            : resource.userId || resource.createdById;
         if (!ownerUserId || ownerUserId !== userId) {
           return next(new AppError("Forbidden", 403));
         }

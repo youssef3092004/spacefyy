@@ -119,7 +119,8 @@ The API runs on `http://localhost:3000/api/v1`.
 | **Business** | id, name, ownerId, planId |
 | **BusinessSettings** | businessId (unique), defaultLanguage (EN/AR), notificationsEnabled, autoApprovePayroll |
 | **Branch** | id, businessId, name, address, image, isActive, openingTime, closingTime |
-| **Plan** | id, name, type (FREE/PRO/ENTERPRISE), price, maxStaff, maxBranches, maxSpaces, ... |
+| **Plan** | id, name, type (FREE/PRO/ENTERPRISE), price, billingInterval, trialDays, maxStaff, maxBranches, maxSpaces, ... |
+| **Subscription** | id, businessId, planId, status (TRIALING/ACTIVE/PAST_DUE/CANCELLED/EXPIRED), priceSnapshot, currentPeriodStart, currentPeriodEnd, trialEndsAt, cancelAtPeriodEnd, cancelledAt, cancelledById |
 
 ### Resources
 
@@ -159,8 +160,9 @@ The API runs on `http://localhost:3000/api/v1`.
 
 | Model | Key Fields |
 |---|---|
-| **Invoice** | id, visitId?, orderId?, branchId?, totalAmount, discountAmount, customerDiscountAmount, finalAmount, status (UNPAID/PAID), paidAt |
+| **Invoice** | id, visitId?, orderId?, branchId?, totalAmount, discountAmount, customerDiscountAmount, finalAmount, status (UNPAID/PAID), paymentMethod? (CASH/BANK/INSTAPAY/CARD — captured at payment), paidAt |
 | **BranchMonthlyStats** | branchId, month, year, newCustomers, activeCustomers, totalRevenue, avgSpendPerCustomer |
+| **BranchDailyReport** | branchId + date (unique), totalRevenue, sessionRevenue, productRevenue, paidInvoiceCount, grossRevenueBeforeDiscount, discountGiven, cash/card/instapay/bank/unknownPaymentTotal, newCustomers, activeCustomers — nightly per-branch snapshot powering the reports module |
 | **StorageUsage** | businessId (unique), currentBranches, currentSpaces, currentDevices, currentUnits, currentEquipment, currentStaff |
 
 ### Staff & Payroll
@@ -207,6 +209,7 @@ Base URL: `/api/v1`
 |---|---|---|
 | POST | `/users/create` | Create user |
 | GET | `/users/getAll` | List all users (DEVELOPER only) |
+| GET | `/users/getMe` | Current user + `userType` (role name) and `branchId` (from staff profile for STAFF/ADMIN; `null` for OWNER/DEVELOPER) |
 | GET | `/users/:id` | Get user |
 | PATCH | `/users/:id` | Update user |
 | DELETE | `/users/:id` | Delete user |
@@ -224,6 +227,19 @@ Base URL: `/api/v1`
 | GET | `/getAll` | List active plans |
 | GET | `/:id` | Get plan details |
 | PATCH | `/:id` | Update plan |
+
+### Subscriptions — `/subscriptions`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/create/:businessId` | Subscribe a business to a plan — first-time or upgrade/downgrade (DEVELOPER only) |
+| GET | `/getAll/:businessId` | Paginated subscription history for a business, newest first (owner or DEVELOPER) |
+| GET | `/current/:businessId` | The business's most recent subscription (owner or DEVELOPER) |
+| GET | `/getById/:id` | Get a subscription by ID (owner or DEVELOPER) |
+| PATCH | `/renew/:id` | Confirm payment received; extends the current period (DEVELOPER only) |
+| PATCH | `/cancel/:businessId` | Cancel the business's current subscription, immediately or at period end (owner or DEVELOPER) |
+
+Creating a business (`POST /businesses/create`) automatically creates its first subscription. See [subscription.md](subscription.md) for the full lifecycle, permissions, and request/response reference.
 
 ### Businesses — `/businesses`
 
@@ -256,15 +272,18 @@ Base URL: `/api/v1`
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/create/:branchId` | Create space |
+| POST | `/create/:branchId` | Create space (`capacity` accepted for PUBLIC only; forced to 1 otherwise) |
 | GET | `/getAll/:branchId` | List spaces (filters: type, isActive, isBusy, capacity) |
+| GET | `/overview/:branchId` | Live branch floor: all spaces + inner devices/units, busy state, `customer`/`visitId` per busy resource, and metrics. See [space-overview.md](space-overview.md) |
 | GET | `/:spaceId` | Get space with analytics |
 | GET | `/byIsActive/:branchId/:isActive` | Filter by active status |
 | GET | `/byType/:branchId/:type` | Filter by type |
 | GET | `/history/:spaceId` | Session history for space |
-| PATCH | `/:spaceId` | Update space |
+| PATCH | `/:spaceId` | Update space (non-PUBLIC `capacity` always 1) |
 | DELETE | `/:spaceId` | Soft delete space |
 | DELETE | `/all/:branchId` | Delete all spaces in branch |
+
+Real-time overview push over Socket.IO is served under `/websocket-space-overview` (`/status/:branchId`, `/emit-live/:branchId`, `/emit-test/:branchId`). See [space-overview.md](space-overview.md).
 
 ### Devices — `/devices`
 
@@ -388,15 +407,29 @@ Base URL: `/api/v1`
 | GET | `/getAll` | List all orders (filters: branchId, visitId, status) |
 | GET | `/analytics/branch/:branchId` | Branch order analytics |
 
+Every order response carries an `invoice` summary: `{ isInvoiced, invoiceId, status }` (`status` is `null` until invoiced, then `UNPAID`/`PAID`). Invoice pay/delete invalidates cached order lists.
+
 ### Invoices — `/invoices`
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/create/:visitId` | Create invoice for closed visit |
-| GET | `/:id` | Get invoice |
-| GET | `/visit/:visitId` | Get invoice for visit |
-| PATCH | `/:id/pay` | Mark invoice PAID |
-| GET | `/unpaid/:branchId` | List unpaid invoices for branch |
+| POST | `/create/:visitId` | Create invoice for a visit — if still `ACTIVE`, closes it first (ends sessions, releases resources, completes its order) |
+| POST | `/createOrder/:orderId` | Create invoice for a completed takeaway order |
+| GET | `/getById/:invoiceId` | Get invoice |
+| GET | `/getByVisit/:visitId` | Get invoice for visit |
+| PATCH | `/pay/:visitId` | Mark a visit's invoice PAID — body requires `paymentMethod` (`CASH`/`CARD`/`INSTAPAY`/`BANK`) |
+| PATCH | `/payById/:invoiceId` | Mark an invoice PAID by ID — same required `paymentMethod` body |
+| GET | `/getAll/:branchId` | List invoices for branch (filter: status UNPAID/PAID) |
+| DELETE | `/delete/:invoiceId` | Delete an UNPAID invoice (reverts its visit to ACTIVE) |
+
+### Reports — `/reports`
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/branch/:branchId` | Branch financial report: income + payment breakdown, trend, outstanding, payroll cost (role-gated), net after payroll, customers, discounts, top products, low stock, and rule-based insights. Query: `startDate`, `endDate` (default: month-to-date), `compare=true`, `trendGroupBy=day|week`. `startDate=endDate=today` = the Daily Closing Report |
+| GET | `/business/:businessId` | Business-wide report (owner/DEVELOPER only): same sections as totals plus a per-branch breakdown with revenue share and per-branch insights for comparing branches |
+
+See [reports.md](reports.md) for the full reference including response shapes, insight rules, payroll visibility, and the snapshot/fallback mechanics.
 
 ### Staff & Payroll — `/staff-profiles`, `/payrolls`
 
@@ -481,10 +514,12 @@ verifyToken → checkPermission("ACTION-RESOURCE") → checkOwnership(...) → c
        PER_GAME    → unitPrice × quantity × gamesCount
    └─ Releases resources (isBusy = false, availableNumber++)
 
-5. PATCH /visits/close/:visitId
+5. PATCH /visits/close/:visitId  (or POST /invoices/create/:visitId on an ACTIVE visit)
+   └─ Auto-ends any still-ACTIVE sessions and releases their resources
    └─ Sums all session totals + order totals
    └─ Applies customer discount (FLAT or PERCENT, with date/time window)
    └─ Applies manual discount (staff-entered at checkout)
+   └─ Completes the visit's OPEN order (status → COMPLETED)
    └─ Creates/upserts Invoice with finalAmount
    └─ Transitions Visit → INVOICED
 
@@ -518,10 +553,12 @@ When triggered, sets Visit → `CANCELLED` with `cancelledAt = now`. No actor is
 
 ### Session Components & Smart Space Detection
 
-When creating a session with a `deviceId` or `unitId`, the system checks the parent space type:
+When creating a session with a `deviceId` or `unitId`, the system checks whether the resource belongs to a space:
 
-- `PUBLIC` or `DESK` space → charge device/unit only (no space fee)
-- `PRIVATE`, `VIP`, `MEETING`, `OTHER` space → charge space + device/unit
+- Has a `spaceId` → charge space + device/unit (every space type is chargeable, including `PUBLIC`/`DESK`)
+- No `spaceId` → charge device/unit only
+
+Passing `spaceId` directly books the space alone, with no device/unit attached.
 
 Components can be added mid-session via the session-components endpoint (e.g. a friend arrives and needs a controller). Each component tracks its own `startedAt` and `endedAt`.
 
@@ -574,12 +611,16 @@ Defined in `utils/*Cron.js` files using `node-cron`, started in `server.js`.
 |---|---|---|---|---|
 | `storageUsageCron` | `utils/storageUsageCron.js` | Weekly (Sunday 00:00) | `STORAGE_USAGE_CRON` | Snapshots StorageUsage and appends to StorageUsageHistory |
 | `branchStatsCron` | `utils/branchStatsCron.js` | Monthly | `BRANCH_STATS_CRON` | Calculates BranchMonthlyStats: new customers, active customers, total revenue, avg spend |
+| `dailyReportCron` | `utils/dailyReportCron.js` | Daily (`10 0 * * *`, 00:10 UTC) | `DAILY_REPORT_CRON` | Snapshots yesterday's BranchDailyReport per active branch (revenue splits, payment breakdown, discounts, customer counts) — powers fast date-range reports. Also: `DAILY_REPORT_CRON_TZ`, `RUN_DAILY_REPORT_ON_BOOT` |
 | `visitAutoCancelCron` | `utils/visitAutoCancelCron.js` | Every 5 min (`*/5 * * * *`) | `VISIT_AUTO_CANCEL_CRON` | Auto-cancels ACTIVE visits older than 30 min with no sessions and no orders |
+| `subscriptionCron` | `utils/subscriptionCron.js` | Hourly (`0 * * * *`) | `SUBSCRIPTION_CRON` | Moves lapsed subscriptions ACTIVE → PAST_DUE → EXPIRED (with plan downgrade), or → CANCELLED if deferred cancellation was requested. Grace period before EXPIRED: `SUBSCRIPTION_GRACE_DAYS` (default 3) |
 
 **Disabling a job:** set its enable env var to `false`:
 ```env
 ENABLE_STORAGE_USAGE_CRON=false
+ENABLE_DAILY_REPORT_CRON=false
 ENABLE_VISIT_AUTO_CANCEL_CRON=false
+ENABLE_SUBSCRIPTION_CRON=false
 ```
 
 ---
@@ -592,5 +633,7 @@ ENABLE_VISIT_AUTO_CANCEL_CRON=false
 | [pricingSystem.md](./pricingSystem.md) | Deep dive into pricing formulas, rules, and examples |
 | [customer.md](./customer.md) | Customer management, analytics, and discount details |
 | [order.md](./order.md) | Order lifecycle and structure |
+| [subscription.md](./subscription.md) | Plans + Subscriptions API reference and lifecycle |
+| [reports.md](./reports.md) | Branch & business financial reports — income, payment breakdown, payroll cost, insights, Daily Closing Report |
 | [RBAC.md](../RBAC.md) | Full authentication and authorization specification |
 | [EQUIPMENT_API_DOCUMENTATION.json](./EQUIPMENT_API_DOCUMENTATION.json) | Equipment endpoint specs (Postman format) |

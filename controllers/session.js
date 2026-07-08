@@ -148,33 +148,17 @@ const buildComponentData = async ({
 
 // ─── Smart resource resolver ──────────────────────────────────────────────────
 
-// PUBLIC and DESK spaces are free zones — no space charge applies when a
-// device or unit session starts inside them. All other types are chargeable.
-const FREE_SPACE_TYPES = new Set(["PUBLIC", "DESK"]);
-
-// For chargeable spaces, fetch the space together with all active resources
-// inside it so they can all be added as components in one go.
-const resolveSpaceWithResources = async (spaceId, branchId) => {
+// Every device/unit session also charges its parent space, regardless of
+// space type — PUBLIC and DESK are no longer free zones. Only the picked
+// device/unit is added alongside it — never the other resources sharing
+// the room.
+const resolveSpaceForComponent = async (spaceId, branchId) => {
   if (!spaceId) return null;
 
-  const space = await prisma.space.findFirst({
-    where: { id: spaceId, branchId },
-    select: {
-      id: true,
-      type: true,
-      devices: {
-        where: { branchId, isActive: true, isDeleted: false },
-        select: { id: true },
-      },
-      units: {
-        where: { branchId, isActive: true, isDeleted: false },
-        select: { id: true },
-      },
-    },
+  return prisma.space.findFirst({
+    where: { id: spaceId, branchId, isActive: true },
+    select: { id: true },
   });
-
-  if (!space || FREE_SPACE_TYPES.has(space.type)) return null;
-  return space;
 };
 
 const resolveComponentsFromDevice = async (deviceId, branchId) => {
@@ -184,15 +168,14 @@ const resolveComponentsFromDevice = async (deviceId, branchId) => {
   });
   if (!device) throw new AppError("Device not found for this branch", 404);
 
-  const space = await resolveSpaceWithResources(device.spaceId, branchId);
+  const space = await resolveSpaceForComponent(device.spaceId, branchId);
   if (!space) {
     return [{ resourceType: "DEVICE", resourceId: deviceId }];
   }
 
   return [
     { resourceType: "SPACE", resourceId: space.id },
-    ...space.devices.map((d) => ({ resourceType: "DEVICE", resourceId: d.id })),
-    ...space.units.map((u) => ({ resourceType: "UNIT", resourceId: u.id })),
+    { resourceType: "DEVICE", resourceId: deviceId },
   ];
 };
 
@@ -203,40 +186,25 @@ const resolveComponentsFromUnit = async (unitId, branchId) => {
   });
   if (!unit) throw new AppError("Unit not found for this branch", 404);
 
-  const space = await resolveSpaceWithResources(unit.spaceId, branchId);
+  const space = await resolveSpaceForComponent(unit.spaceId, branchId);
   if (!space) {
     return [{ resourceType: "UNIT", resourceId: unitId }];
   }
 
   return [
     { resourceType: "SPACE", resourceId: space.id },
-    ...space.devices.map((d) => ({ resourceType: "DEVICE", resourceId: d.id })),
-    ...space.units.map((u) => ({ resourceType: "UNIT", resourceId: u.id })),
+    { resourceType: "UNIT", resourceId: unitId },
   ];
 };
 
 const resolveComponentsFromSpace = async (spaceId, branchId) => {
   const space = await prisma.space.findFirst({
-    where: { id: spaceId, branchId, isActive: true, isDeleted: false },
-    select: {
-      id: true,
-      devices: {
-        where: { branchId, isActive: true, isDeleted: false },
-        select: { id: true },
-      },
-      units: {
-        where: { branchId, isActive: true, isDeleted: false },
-        select: { id: true },
-      },
-    },
+    where: { id: spaceId, branchId, isActive: true },
+    select: { id: true },
   });
   if (!space) throw new AppError("Space not found for this branch", 404);
 
-  return [
-    { resourceType: "SPACE", resourceId: space.id },
-    ...space.devices.map((d) => ({ resourceType: "DEVICE", resourceId: d.id })),
-    ...space.units.map((u) => ({ resourceType: "UNIT", resourceId: u.id })),
-  ];
+  return [{ resourceType: "SPACE", resourceId: space.id }];
 };
 
 // ─── Controllers ──────────────────────────────────────────────────────────────

@@ -39,6 +39,11 @@ There are two types of orders in the system:
   "totalPrice": 100.00,
   "finalPrice": 76.50,
   "itemCount": 3,
+  "invoice": {
+    "isInvoiced": true,
+    "invoiceId": "uuid",
+    "status": "UNPAID"
+  },
   "orderItems": [
     {
       "id": "uuid",
@@ -59,6 +64,11 @@ There are two types of orders in the system:
 ```
 
 **Order statuses:** `OPEN`, `COMPLETED`
+
+**`invoice`:** always present, even before invoicing.
+- `isInvoiced`: `false` until an invoice is created for this order.
+- `invoiceId`: `null` until invoiced, then the invoice's `uuid`.
+- `status`: `null` until invoiced, then `"UNPAID"` or `"PAID"`.
 
 ---
 
@@ -320,10 +330,13 @@ Reading and invoicing are still allowed on completed orders.
 Visit ACTIVE
   → POST /orders/create (with visitId) → Order OPEN
   → Add/update/remove items as needed
-  → PATCH /orders/visit/:visitId/complete → Order COMPLETED
-  → POST /invoices/create/:visitId → Invoice UNPAID
-  → PATCH /invoices/pay/:visitId → Invoice PAID, Visit PAID
+  → PATCH /visits/close/:visitId  (or POST /invoices/create/:visitId on an ACTIVE visit)
+      → Order auto-completes to COMPLETED
+      → Visit → INVOICED, Invoice → UNPAID
+  → PATCH /invoices/pay/:visitId → Invoice PAID
 ```
+
+You don't need to call `PATCH /orders/visit/:visitId/complete` manually before closing — closing the visit (via either endpoint above) completes the order for you. That endpoint still exists for completing an order while the visit stays open/active.
 
 ### Takeaway Order Flow
 ```

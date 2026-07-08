@@ -34,13 +34,13 @@ router.get(
 router.get(
   "/getById/:id",
   verifyToken,
-  cacheMiddleware((req) => `user:${req.params.id}`, "TTL_BY_ID"),
   checkPermission("VIEW-USERS"),
   checkOwnership({
     model: "user",
     paramId: "id",
     scope: "user",
   }),
+  cacheMiddleware((req) => `user:${req.params.id}`, "TTL_BY_ID"),
   getUserById,
 );
 router.delete(
@@ -65,7 +65,6 @@ router.patch(
   verifyToken,
   checkPermission("UPDATE-USERS"),
   upload.single("profileImage"),
-  cacheMiddleware((req) => `user:${req.params.id}`, "TTL_BY_ID"),
   checkOwnership({
     model: "user",
     paramId: "id",

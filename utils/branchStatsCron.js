@@ -27,7 +27,7 @@ export const computeAndStoreBranchMonthlyStats = async (
         where: {
           branchId,
           startedAt: { gte: startOfMonth, lte: endOfMonth },
-          status: { in: ["INVOICED", "PAID"] },
+          status: "INVOICED",
         },
         _sum: { totalPrice: true },
       }),
