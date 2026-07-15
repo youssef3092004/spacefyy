@@ -45,6 +45,12 @@ export const PERMISSIONS = [
   { name: "UPDATE-PAYROLLS", description: "Update payrolls" },
   { name: "DELETE-PAYROLLS", description: "Delete payrolls" },
 
+  { name: "OPEN-SHIFTS", description: "Open shifts" },
+  { name: "CLOSE-SHIFTS", description: "Close shifts" },
+  { name: "VIEW-SHIFTS", description: "View shifts" },
+  { name: "MANAGE-ATTENDANCE", description: "Manage shift attendance" },
+  { name: "MANAGE-EXPENSES", description: "Manage shift petty-cash expenses" },
+
   { name: "CREATE-PERMISSIONS", description: "Create permissions" },
   { name: "VIEW-PERMISSIONS", description: "View permissions" },
   { name: "UPDATE-PERMISSIONS", description: "Update permissions" },
@@ -241,6 +247,13 @@ const STAFF_PERMISSIONS = [
   "CREATE-INVOICES",
   "VIEW-INVOICES",
   "UPDATE-INVOICES",
+
+  // Shifts
+  "OPEN-SHIFTS",
+  "CLOSE-SHIFTS",
+  "VIEW-SHIFTS",
+  "MANAGE-ATTENDANCE",
+  "MANAGE-EXPENSES",
 ];
 
 const createPermissionsBulk = async (req, res, next) => {

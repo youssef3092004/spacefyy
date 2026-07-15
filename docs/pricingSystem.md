@@ -84,7 +84,7 @@ A `PricingRule` can override the resource's default price and type.
 |---|---|
 | `FIXED_PRICE` | Flat fee regardless of time — treated as `PER_SESSION` |
 | `PER_HOUR` | Price multiplied by duration in hours |
-| `TIME_RANGE` | Time-based with optional min/max duration and player count constraints |
+| `TIME_RANGE` | Time-based; billed like `PER_HOUR`. (Its `minDurationMinutes`/`maxDurationMinutes` are validated on the rule but not yet applied at billing.) |
 
 ### PricingType
 
@@ -113,6 +113,59 @@ PER_GAME:    totalPrice = unitPrice × quantity × gamesCount  ← gamesCount mu
 **While a session is ACTIVE** (no `endedAt`), `totalPrice` is stored as `0` (placeholder). The real price is calculated when `endSession` or `removeComponent` is called.
 
 The `unitPrice` is a **snapshot** — taken from the resource or pricing rule at the moment the component is created. Changing a resource's price after a session starts does not affect that session.
+
+---
+
+## Player-Count (Mode) Pricing
+
+A console/table can be billed differently by **player count** — e.g. Single (1v1) vs Double (2v2) — with each mode shown as its own timed line on the bill.
+
+You control the mode with two optional body fields, on **`POST /sessions/create/:branchId`** and **`PATCH /sessions/change-players/:sessionId`**:
+- `players` — the player count (e.g. `2`, `4`), stored on the device/unit segment.
+- `modeLabel` — the **text you want the customer to see** (e.g. `"SGL"`, `"DBL"`, or Arabic). Free text; applies to the device/unit segment only. If omitted, it falls back to a matched pricing-rule name, else `null`.
+
+The extra **cost** of more players is added by the frontend/staff as **equipment components** (e.g. adding controllers via `addComponent`), so the mix is fully dynamic — the label and the charge are independent.
+
+### Setup: player-banded pricing rules
+
+Define one `PricingRule` per band on the device/unit, using `minPlayers`/`maxPlayers`:
+
+| name | minPlayers | maxPlayers | price | priority |
+|---|---|---|---|---|
+| `SGL` | 1 | 2 | 20 | 10 |
+| `DBL` | 3 | 4 | 30 | 10 |
+
+- When a session is created/switched **with a player count**, `resolvePricingRule` matches only rules whose `[minPlayers, maxPlayers]` band contains it (a `null` bound is open-ended), then picks the highest `priority`.
+- A **generic** rule (both bounds `null`) matches any count — so give player-banded rules a higher `priority` so they win.
+- **No matching rule → base price fallback.** A resource's base `price` is a single scalar and **cannot** vary by player count, so tiered pricing *requires* per-band rules; the base price is only the last-resort flat fallback.
+- The matched rule's **name** is snapshotted onto the component as `modeLabel` (e.g. `"SGL"`/`"DBL"`), and the player count as `players`. Both appear on the component in `GET /visits/getById/:visitId` (and session views) so the customer sees the mode.
+
+### Starting a session with a mode
+
+`POST /sessions/create/:branchId` accepts optional `players` + `modeLabel`:
+```json
+{ "visitId": "...", "deviceId": "...", "players": 2, "modeLabel": "SGL" }
+```
+→ the DEVICE/UNIT component is stamped with `players: 2` and `modeLabel: "SGL"` (priced from the matching pricing-rule band if one exists, else the resource's base price). Omit both → `players`/`modeLabel` null, base pricing as before.
+
+### Switching mode mid-session
+
+`PATCH /sessions/change-players/:sessionId`, body `{ players, modeLabel?, resourceId? }` (gated by `UPDATE-SESSIONS` + an open shift; `modeLabel` = your own label for the new segment; `resourceId` only needed if the session has more than one active device/unit).
+
+It **segments** the device's play: it closes the current segment at **the current server time (`now`)** (billing it over its own window) and opens a fresh segment at the new count/label starting the same instant — zero gap. Note: the switch time is always `now` — there is no way to backdate it. Crucially, the physical device is **not released** during the swap (it stays `isBusy`), so no one else can book it mid-switch and controllers/equipment keep running. At `endSession`, each segment is priced over its own `startedAt → endedAt` window and summed.
+
+**Worked example** — SGL @ 20/h, DBL @ 30/h, private room SPACE @ 60/h:
+```
+Start 14:00 players=2 (SGL). At 15:00 → change-players 4 (DBL). End 17:00.
+  SPACE  — 14:00→17:00 — 180 min — 180.00
+  DEVICE — SGL — 14:00→15:00 —  60 min —  20.00
+  DEVICE — DBL — 15:00→17:00 — 120 min —  60.00
+  session total = 260.00
+```
+
+> Note: "player count" here can be whatever the café means by a mode — SGL (1v1) may map to 2 players, DBL (2v2) to 4 — the label the customer sees is the matched rule's **name** when a player-banded rule is used, otherwise just the raw number.
+
+**Adding controllers for extra players:** controllers are **not** added automatically. When a session becomes multiplayer, the frontend/staff add the controllers as EQUIPMENT components via `addComponent` (with the desired `quantity`), each billed over its own window at the equipment's rate. This keeps the equipment mix fully dynamic and staff-controlled.
 
 ---
 

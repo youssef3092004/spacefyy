@@ -104,6 +104,40 @@ export const computeDailyBranchAggregate = async (branchIds, dayStart, dayEnd) =
   return { ...roundMetrics(acc), newCustomers, activeCustomers: activeCustomerRows.length };
 };
 
+// Same figures as computeDailyBranchAggregate, but for a single shift:
+// prefers invoices explicitly linked via invoice.shiftId (the source of
+// truth now that every payment is gated behind an open shift — see
+// utils/requireOpenShift.js) over the time window. Invoices paid before
+// shiftId existed (shiftId: null) still fall back to the [windowStart,
+// windowEnd) time match, so shifts closed before this migration stay
+// accurate. Only one shift can be OPEN per branch at a time, so these two
+// matching strategies never double-count within a single shift's figures.
+export const computeShiftBoundMetrics = async (branchId, shiftId, windowStart, windowEnd) => {
+  const branchFilter = {
+    OR: [{ branchId }, { visit: { branchId } }],
+  };
+
+  const paidInvoices = await prisma.invoice.findMany({
+    where: {
+      AND: [
+        branchFilter,
+        { status: "PAID" },
+        {
+          OR: [
+            { shiftId },
+            { shiftId: null, paidAt: { gte: windowStart, lt: windowEnd } },
+          ],
+        },
+      ],
+    },
+    select: INVOICE_SELECT,
+  });
+
+  const acc = emptyDayMetrics();
+  for (const inv of paidInvoices) applyInvoiceToMetrics(acc, inv);
+  return roundMetrics(acc);
+};
+
 // Fetches every paid invoice in [start, end] in ONE query and buckets the
 // income/payment figures per UTC calendar day in JS. Used as the live
 // fallback when daily snapshots have gaps (or don't cover the range at

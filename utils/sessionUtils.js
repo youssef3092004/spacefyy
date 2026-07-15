@@ -156,3 +156,14 @@ export const getSessionQueryOptions = (query = {}) => {
 
   return { page, limit, skip, sort, order, where };
 };
+
+// Adds a display-friendly `modeLabel` to a session component: prefers the
+// snapshotted rule name; falls back to "{n} players" when a player count was
+// set without a named rule; null when players is irrelevant (SPACE/EQUIPMENT).
+export const serializeComponent = (component) => {
+  if (!component) return component;
+  const modeLabel =
+    component.modeLabel ??
+    (component.players != null ? `${component.players} players` : null);
+  return { ...component, modeLabel };
+};

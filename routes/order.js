@@ -17,6 +17,7 @@ import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 import { autoInvalidateCache } from "../middleware/autoInvalidateCache.js";
+import { requireOpenShift } from "../utils/requireOpenShift.js";
 
 const router = Router();
 
@@ -51,6 +52,7 @@ router.patch(
   verifyToken,
   checkPermission("updateOrder"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  requireOpenShift(),
   autoInvalidateCache(),
   completeOrder,
 );
@@ -60,6 +62,7 @@ router.patch(
   verifyToken,
   checkPermission("updateOrder"),
   checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
+  requireOpenShift(),
   autoInvalidateCache(),
   completeTakeawayOrder,
 );

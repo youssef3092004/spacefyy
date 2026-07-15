@@ -130,7 +130,7 @@ export const payInvoice = async (req, res, next) => {
     const { visitId } = req.params;
     if (!visitId) return next(new AppError("Visit ID is required", 400));
 
-    const { paymentMethod } = req.params ?? {};
+    const { paymentMethod } = req.body ?? {};
     if (!paymentMethod || !VALID_PAYMENT_METHODS.has(paymentMethod)) {
       return next(
         new AppError(
@@ -152,7 +152,12 @@ export const payInvoice = async (req, res, next) => {
     const paidInvoice = await prisma.$transaction(async (tx) => {
       const updated = await tx.invoice.update({
         where: { visitId },
-        data: { status: "PAID", paidAt: new Date(), paymentMethod },
+        data: {
+          status: "PAID",
+          paidAt: new Date(),
+          paymentMethod,
+          ...(req.openShift ? { shiftId: req.openShift.id } : {}),
+        },
         include: INVOICE_INCLUDE,
       });
 
@@ -175,7 +180,7 @@ export const payInvoiceById = async (req, res, next) => {
   try {
     const { invoiceId } = req.params;
 
-    const { paymentMethod } = req.params ?? {};
+    const { paymentMethod } = req.body ?? {};
     if (!paymentMethod || !VALID_PAYMENT_METHODS.has(paymentMethod)) {
       return next(
         new AppError(
@@ -197,7 +202,12 @@ export const payInvoiceById = async (req, res, next) => {
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.invoice.update({
         where: { id: invoiceId },
-        data: { status: "PAID", paidAt: new Date(), paymentMethod },
+        data: {
+          status: "PAID",
+          paidAt: new Date(),
+          paymentMethod,
+          ...(req.openShift ? { shiftId: req.openShift.id } : {}),
+        },
         include: INVOICE_INCLUDE,
       });
 

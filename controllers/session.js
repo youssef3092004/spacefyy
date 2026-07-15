@@ -9,6 +9,7 @@ import {
   parseDate,
   parseMoney,
   roundMoney,
+  serializeComponent,
 } from "../utils/sessionUtils.js";
 import {
   ensureResourceExists,
@@ -53,6 +54,8 @@ const componentSelect = {
   unitPrice: true,
   quantity: true,
   gamesCount: true,
+  players: true,
+  modeLabel: true,
   startedAt: true,
   endedAt: true,
   durationMinutes: true,
@@ -95,6 +98,9 @@ const buildComponentData = async ({
   resourceId,
   branchId,
   gamesCount,
+  players,
+  quantity,
+  modeLabel,
   sessionId,
   startedAt,
 }) => {
@@ -106,10 +112,22 @@ const buildComponentData = async ({
     branchId,
   });
 
+  // players and the mode label only apply to the actual playable resource
+  // (device/unit); ignore them for SPACE/EQUIPMENT.
+  const isModeResource =
+    normalizedType === "DEVICE" || normalizedType === "UNIT";
+  const playersForPricing =
+    isModeResource && players != null ? Number(players) : undefined;
+  const explicitLabel =
+    modeLabel != null && String(modeLabel).trim()
+      ? String(modeLabel).trim()
+      : null;
+
   const pricingRule = await resolvePricingRule({
     resourceType: normalizedType,
     resourceId,
     branchId,
+    players: playersForPricing,
   });
   const resourcePricing = await resolveResourcePricing({
     resourceType: normalizedType,
@@ -138,8 +156,14 @@ const buildComponentData = async ({
       pricingRuleId: pricingRule?.id ?? null,
       priceType,
       unitPrice,
-      quantity: 1,
+      quantity: quantity != null ? Math.max(1, Number(quantity)) : 1,
       gamesCount: gamesCount != null ? Number(gamesCount) : 0,
+      players: playersForPricing ?? null,
+      // Explicit label from the request wins; otherwise fall back to a matched
+      // pricing rule's name (null when neither exists).
+      modeLabel: isModeResource
+        ? (explicitLabel ?? pricingRule?.name ?? null)
+        : null,
       startedAt,
       totalPrice: 0,
     },
@@ -161,7 +185,7 @@ const resolveSpaceForComponent = async (spaceId, branchId) => {
   });
 };
 
-const resolveComponentsFromDevice = async (deviceId, branchId) => {
+const resolveComponentsFromDevice = async (deviceId, branchId, players, modeLabel) => {
   const device = await prisma.device.findFirst({
     where: { id: deviceId, branchId, isActive: true, isDeleted: false },
     select: { id: true, spaceId: true },
@@ -170,16 +194,16 @@ const resolveComponentsFromDevice = async (deviceId, branchId) => {
 
   const space = await resolveSpaceForComponent(device.spaceId, branchId);
   if (!space) {
-    return [{ resourceType: "DEVICE", resourceId: deviceId }];
+    return [{ resourceType: "DEVICE", resourceId: deviceId, players, modeLabel }];
   }
 
   return [
     { resourceType: "SPACE", resourceId: space.id },
-    { resourceType: "DEVICE", resourceId: deviceId },
+    { resourceType: "DEVICE", resourceId: deviceId, players, modeLabel },
   ];
 };
 
-const resolveComponentsFromUnit = async (unitId, branchId) => {
+const resolveComponentsFromUnit = async (unitId, branchId, players, modeLabel) => {
   const unit = await prisma.unit.findFirst({
     where: { id: unitId, branchId, isActive: true, isDeleted: false },
     select: { id: true, spaceId: true },
@@ -188,12 +212,12 @@ const resolveComponentsFromUnit = async (unitId, branchId) => {
 
   const space = await resolveSpaceForComponent(unit.spaceId, branchId);
   if (!space) {
-    return [{ resourceType: "UNIT", resourceId: unitId }];
+    return [{ resourceType: "UNIT", resourceId: unitId, players, modeLabel }];
   }
 
   return [
     { resourceType: "SPACE", resourceId: space.id },
-    { resourceType: "UNIT", resourceId: unitId },
+    { resourceType: "UNIT", resourceId: unitId, players, modeLabel },
   ];
 };
 
@@ -212,8 +236,17 @@ const resolveComponentsFromSpace = async (spaceId, branchId) => {
 export const createSession = async (req, res, next) => {
   try {
     const { branchId } = req.params;
-    const { visitId, bookingId, startedAt, deviceId, unitId, spaceId, components } =
-      req.body ?? {};
+    const {
+      visitId,
+      bookingId,
+      startedAt,
+      deviceId,
+      unitId,
+      spaceId,
+      components,
+      players,
+      modeLabel,
+    } = req.body ?? {};
 
     if (!branchId || !visitId) {
       return next(new AppError("branchId and visitId are required", 400));
@@ -288,9 +321,9 @@ export const createSession = async (req, res, next) => {
     let rawComponents;
     try {
       if (deviceId) {
-        rawComponents = await resolveComponentsFromDevice(deviceId, branchId);
+        rawComponents = await resolveComponentsFromDevice(deviceId, branchId, players, modeLabel);
       } else if (unitId) {
-        rawComponents = await resolveComponentsFromUnit(unitId, branchId);
+        rawComponents = await resolveComponentsFromUnit(unitId, branchId, players, modeLabel);
       } else if (spaceId) {
         rawComponents = await resolveComponentsFromSpace(spaceId, branchId);
       } else {
@@ -308,6 +341,9 @@ export const createSession = async (req, res, next) => {
           resourceId: c.resourceId,
           branchId,
           gamesCount: c.gamesCount,
+          players: c.players,
+          quantity: c.quantity,
+          modeLabel: c.modeLabel,
           sessionId: null,
           startedAt: sessionStartedAt,
         }),
@@ -332,6 +368,7 @@ export const createSession = async (req, res, next) => {
           resourceType: built.normalizedType,
           resourceId: built.data.resourceId,
           branchId,
+          quantity: built.data.quantity,
         });
         await tx.sessionComponent.create({
           data: { ...built.data, sessionId: created.id },
@@ -632,7 +669,12 @@ export const getSessionById = async (req, res, next) => {
     const session = await getSessionByIdOrThrow(sessionId);
     ensureBranchMatch(session.branchId, branchId);
 
-    res.status(200).json({ success: true, data: session });
+    const data = {
+      ...session,
+      components: (session.components ?? []).map(serializeComponent),
+    };
+
+    res.status(200).json({ success: true, data });
   } catch (error) {
     next(error);
   }

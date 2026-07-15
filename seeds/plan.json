@@ -13,7 +13,8 @@
     "maxBranches": 1,
     "maxSpaces": 10,
     "maxDevices": 20,
-    "maxUnits": 50
+    "maxUnits": 50,
+    "maxShiftsPerDay": 1
   },
   {
     "id": "22334455-6677-4890-bbbb-ccccddddeeee",
@@ -29,6 +30,7 @@
     "maxBranches": 5,
     "maxSpaces": 50,
     "maxDevices": 100,
-    "maxUnits": 250
+    "maxUnits": 250,
+    "maxShiftsPerDay": 3
   }
 ]

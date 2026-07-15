@@ -60,7 +60,7 @@ export const checkOwnership = ({
       const idModels = new Set([
         "branch", "business", "session", "sessionComponent",
         "visit", "device", "space", "unit", "equipment", "product", "categoryProduct",
-        "order", "invoice", "user",
+        "order", "invoice", "user", "shift",
       ]);
       const whereField = idModels.has(model) ? "id" : paramId;
 

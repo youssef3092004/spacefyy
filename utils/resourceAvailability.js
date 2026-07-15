@@ -94,17 +94,43 @@ export const resolveResourcePricing = async ({ resourceType, resourceId, branchI
   };
 };
 
-export const resolvePricingRule = async ({ resourceType, resourceId, branchId }) => {
+export const resolvePricingRule = async ({
+  resourceType,
+  resourceId,
+  branchId,
+  players,
+}) => {
   const resourceFilter =
     resourceType === "SPACE"    ? { spaceId: resourceId }
     : resourceType === "DEVICE" ? { deviceId: resourceId }
     : resourceType === "UNIT"   ? { unitId: resourceId }
     : { equipmentId: resourceId };
 
+  // When a player count is given, only match rules whose [minPlayers, maxPlayers]
+  // band contains it (a null bound is open-ended). A generic rule with both
+  // bounds null still matches any count, so single-rule branches keep working —
+  // give player-banded rules a higher `priority` so they win the ordering.
+  const playerFilter =
+    players != null
+      ? {
+          AND: [
+            { OR: [{ minPlayers: null }, { minPlayers: { lte: players } }] },
+            { OR: [{ maxPlayers: null }, { maxPlayers: { gte: players } }] },
+          ],
+        }
+      : {};
+
   return prisma.pricingRule.findFirst({
-    where: { branchId, isActive: true, ...resourceFilter },
+    where: { branchId, isActive: true, ...resourceFilter, ...playerFilter },
     orderBy: { priority: "desc" },
-    select: { id: true, pricingMode: true, price: true, currency: true, pricingType: true },
+    select: {
+      id: true,
+      name: true,
+      pricingMode: true,
+      price: true,
+      currency: true,
+      pricingType: true,
+    },
   });
 };
 

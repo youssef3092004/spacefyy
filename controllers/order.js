@@ -9,6 +9,7 @@ import {
   checkBranchAccess,
   getAccessibleBranchIds,
 } from "../utils/checkBranchAccess.js";
+import { assertOpenShift } from "../utils/requireOpenShift.js";
 import { randomUUID } from "crypto";
 
 // ─── Prisma include shape ─────────────────────────────────────────────────────
@@ -30,13 +31,13 @@ export const ORDER_INCLUDE = {
     select: { id: true, name: true },
   },
   invoice: {
-    select: { id: true, status: true },
+    select: { id: true, status: true, paymentMethod: true },
   },
 };
 
 const ORDER_LIST_INCLUDE = {
   _count: { select: { orderItems: true } },
-  invoice: { select: { id: true, status: true } },
+  invoice: { select: { id: true, status: true, paymentMethod: true } },
 };
 
 const INVOICE_INCLUDE = {
@@ -121,6 +122,7 @@ const formatInvoiceSummary = (invoice) => ({
   isInvoiced: !!invoice,
   invoiceId: invoice?.id ?? null,
   status: invoice?.status ?? null,
+  paymentMethod: invoice?.paymentMethod ?? null,
 });
 
 export const formatOrder = (order) => ({
@@ -323,6 +325,11 @@ export const addOrderItems = async (req, res, next) => {
       resolvedCustomerId = bodyCustomerId?.trim() || null;
       isTakeaway = true;
     }
+
+    // branchId isn't known until here (visit order vs. takeaway resolve it
+    // differently), so this route can't gate via requireOpenShift() middleware
+    // like the branch-scoped routes do — checked directly instead.
+    await assertOpenShift(resolvedBranchId, req.user?.roleName);
 
     // ── Discount resolution ───────────────────────────────────────────────────
     // Visit orders: no discount at order level — discount is applied once at invoice level.

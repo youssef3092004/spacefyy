@@ -11,6 +11,7 @@ import {
   calculateComponentPrice,
   calculateDurationMinutes,
   roundMoney,
+  serializeComponent,
 } from "../utils/sessionUtils.js";
 import { releaseResourceAvailability } from "../utils/resourceAvailability.js";
 
@@ -32,6 +33,18 @@ const visitSelect = {
   createdAt: true,
   updatedAt: true,
 };
+
+// A visit has at most one invoice (1-1 via Invoice.visitId). Mirror the order
+// controller's invoice summary so clients get a consistent billing snapshot,
+// with paymentMethod added.
+const visitInvoiceSelect = { id: true, status: true, paymentMethod: true };
+
+const formatVisitInvoiceSummary = (invoice) => ({
+  isInvoiced: !!invoice,
+  invoiceId: invoice?.id ?? null,
+  status: invoice?.status ?? null,
+  paymentMethod: invoice?.paymentMethod ?? null,
+});
 
 const validateManualDiscount = (discountType, discountAmount) => {
   if (!discountType && !discountAmount) return { type: "FLAT", amount: 0 };
@@ -101,6 +114,7 @@ export const getAllByBranchId = async (req, res, next) => {
         orderBy: { [sort]: order },
         select: {
           ...visitSelect,
+          invoice: { select: visitInvoiceSelect },
           sessions: {
             where: { deletedAt: null },
             select: { status: true },
@@ -115,8 +129,9 @@ export const getAllByBranchId = async (req, res, next) => {
 
     if (!branch) return next(new AppError("Branch not found", 404));
 
-    const data = visits.map(({ sessions, _count, ...visit }) => ({
+    const data = visits.map(({ sessions, _count, invoice, ...visit }) => ({
       ...visit,
+      invoice: formatVisitInvoiceSummary(invoice),
       sessionCount: sessions.length,
       sessionStatuses: [...new Set(sessions.map((s) => s.status))],
       totalOrders: _count.orders,
@@ -231,6 +246,7 @@ export const getVisitById = async (req, res, next) => {
         where: { id: visitId },
         select: {
           ...visitSelect,
+          invoice: { select: visitInvoiceSelect },
           sessions: {
             where: { deletedAt: null },
             select: {
@@ -242,6 +258,23 @@ export const getVisitById = async (req, res, next) => {
               totalPrice: true,
               currency: true,
               createdAt: true,
+              components: {
+                orderBy: { startedAt: "asc" },
+                select: {
+                  id: true,
+                  resourceType: true,
+                  resourceId: true,
+                  priceType: true,
+                  unitPrice: true,
+                  quantity: true,
+                  players: true,
+                  modeLabel: true,
+                  startedAt: true,
+                  endedAt: true,
+                  durationMinutes: true,
+                  totalPrice: true,
+                },
+              },
             },
           },
         },
@@ -254,13 +287,67 @@ export const getVisitById = async (req, res, next) => {
 
     if (!visit) return next(new AppError("Visit not found", 404));
 
-    const { sessions, ...visitData } = visit;
+    const { sessions, invoice, ...visitData } = visit;
+
+    // SessionComponent is polymorphic (resourceType + resourceId, no relation),
+    // so batch-fetch the actual SPACE/DEVICE/UNIT/EQUIPMENT records and attach
+    // each one's details to its component, so the customer breakdown reads by
+    // name ("PS5 Station 3", "DualSense Controller") rather than a raw id.
+    const allComponents = sessions.flatMap((s) => s.components ?? []);
+    const idsByType = { SPACE: [], DEVICE: [], UNIT: [], EQUIPMENT: [] };
+    for (const c of allComponents) {
+      if (idsByType[c.resourceType]) idsByType[c.resourceType].push(c.resourceId);
+    }
+
+    const [spaces, devices, units, equipment] = await Promise.all([
+      idsByType.SPACE.length
+        ? prisma.space.findMany({
+            where: { id: { in: idsByType.SPACE } },
+            select: { id: true, name: true, type: true },
+          })
+        : [],
+      idsByType.DEVICE.length
+        ? prisma.device.findMany({
+            where: { id: { in: idsByType.DEVICE } },
+            select: { id: true, name: true, type: true, customTypeLabel: true },
+          })
+        : [],
+      idsByType.UNIT.length
+        ? prisma.unit.findMany({
+            where: { id: { in: idsByType.UNIT } },
+            select: { id: true, name: true, type: true, customTypeLabel: true },
+          })
+        : [],
+      idsByType.EQUIPMENT.length
+        ? prisma.equipment.findMany({
+            where: { id: { in: idsByType.EQUIPMENT } },
+            select: { id: true, name: true, type: true, customTypeLabel: true },
+          })
+        : [],
+    ]);
+
+    const resourceMap = new Map();
+    for (const r of spaces) resourceMap.set(`SPACE:${r.id}`, r);
+    for (const r of devices) resourceMap.set(`DEVICE:${r.id}`, r);
+    for (const r of units) resourceMap.set(`UNIT:${r.id}`, r);
+    for (const r of equipment) resourceMap.set(`EQUIPMENT:${r.id}`, r);
+
+    // Attach the display-friendly modeLabel + the resolved resource to each
+    // component, so the breakdown reads e.g. "PS5 Station 3 — DBL 15:00→17:00".
+    const sessionsWithLabels = sessions.map((s) => ({
+      ...s,
+      components: (s.components ?? []).map((c) => ({
+        ...serializeComponent(c),
+        resource: resourceMap.get(`${c.resourceType}:${c.resourceId}`) ?? null,
+      })),
+    }));
 
     res.status(200).json({
       success: true,
       data: {
         ...visitData,
-        sessions,
+        invoice: formatVisitInvoiceSummary(invoice),
+        sessions: sessionsWithLabels,
         orders: rawOrders.map(formatOrder),
       },
     });

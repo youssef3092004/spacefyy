@@ -2,6 +2,7 @@ import { Router } from "express";
 import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
+import { requireOpenShift } from "../utils/requireOpenShift.js";
 import {
   cancelSession,
   createSession,
@@ -12,6 +13,7 @@ import {
   getSessionById,
   updateSessionById,
 } from "../controllers/session.js";
+import { changeSessionPlayers } from "../controllers/sessionComponent.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 
 const router = Router();
@@ -21,6 +23,7 @@ router.post(
   verifyToken,
   checkPermission("CREATE-SESSIONS", true),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  requireOpenShift(),
   createSession,
 );
 
@@ -67,6 +70,7 @@ router.patch(
   verifyToken,
   checkPermission("UPDATE-SESSIONS"),
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
+  requireOpenShift(),
   endSession,
 );
 
@@ -75,7 +79,17 @@ router.patch(
   verifyToken,
   checkPermission("UPDATE-SESSIONS"),
   checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
+  requireOpenShift(),
   cancelSession,
+);
+
+router.patch(
+  "/change-players/:sessionId",
+  verifyToken,
+  checkPermission("UPDATE-SESSIONS"),
+  checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
+  requireOpenShift(),
+  changeSessionPlayers,
 );
 
 router.delete(

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
+import { requireOpenShift } from "../utils/requireOpenShift.js";
 import {
   cancelVisit,
   closeVisit,
@@ -17,6 +18,7 @@ router.post(
   verifyToken,
   checkPermission("CREATE-VISITS"),
   checkOwnership({ model: "branch", paramId: "branchId", scope: "branch" }),
+  requireOpenShift(),
   startVisit,
 );
 router.get(
@@ -38,6 +40,7 @@ router.patch(
   verifyToken,
   checkPermission("UPDATE-VISITS"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  requireOpenShift(),
   closeVisit,
 );
 router.patch(
@@ -45,6 +48,7 @@ router.patch(
   verifyToken,
   checkPermission("UPDATE-VISITS"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  requireOpenShift(),
   cancelVisit,
 );
 

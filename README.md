@@ -21,6 +21,7 @@ Spacefyy is a multi-tenant backend API for managing branch-based businesses — 
   - [Pricing](#pricing)
   - [Products & Categories](#products--categories)
   - [Staff & Payroll](#staff--payroll)
+  - [Shifts & Attendance](#shifts--attendance)
   - [Analytics & Reports](#analytics--reports)
   - [Plans, Subscriptions & Storage](#plans-subscriptions--storage)
 - [Pricing System](#pricing-system)
@@ -179,7 +180,9 @@ Equipment is always added mid-session via `addComponent`, never as a session sta
 
 When the session ends, each component calculates its own price and the session total is the sum of all components.
 
-→ See the [Pricing System](docs/pricingSystem.md) for formulas, smart mode logic, and full scenarios.
+**Player-count (mode) pricing:** a console can bill differently by player count — Single (1v1) vs Double (2v2). Pass `players` when creating a session and switch mid-session with `PATCH /sessions/change-players/:sessionId`; each mode becomes its own timed line on the bill (the device is never released during a switch, so it can't be booked mid-swap). Extra controllers for more players are added dynamically by the frontend/staff as equipment components (`addComponent`), not automatically. Optionally, `PricingRule`s with `minPlayers`/`maxPlayers` can make the console's own rate vary by band.
+
+→ See the [Pricing System](docs/pricingSystem.md) for formulas, smart mode logic, player-count pricing, and full scenarios.
 
 ---
 
@@ -237,6 +240,24 @@ Stock is automatically adjusted when order items are added, updated, removed, or
 Staff members have profiles linked to a branch with a base salary, hire date, position, and optional national ID. Payroll records are created monthly and go through an approval workflow before being marked as paid.
 
 **Payroll lifecycle:** `PENDING` → `APPROVED` → `PAID` (or `REJECTED`)
+
+---
+
+### Shifts, Attendance & Till Reconciliation
+
+Supervisors run a branch's day as a sequence of **shifts**, opened and closed manually (no timers). Only one shift can be `OPEN` per branch at a time — the current one is closed with a handover form before the next opens. Shift numbers (1, 2, 3…) are assigned automatically per branch per day.
+
+The number of shifts a branch may run per day is **capped by its subscription plan** (`Plan.maxShiftsPerDay`, `null` = unlimited) — hitting the cap returns `403`.
+
+**No sale, booking, session, order, or payment can happen without an open shift** — every money-touching write (starting/closing a visit, sessions, orders, order items, invoice creation/payment) is blocked with `400` unless the branch currently has one `OPEN`. `OWNER`/`DEVELOPER` bypass this gate. Every invoice paid by a `STAFF`/`ADMIN` user is stamped with the shift that was open at the time (`Invoice.shiftId`), so revenue is provably attributable, not just time-window-guessed.
+
+Opening a shift requires a counted **opening cash** float; closing requires handover notes and a manually counted **actual cash** amount. The system computes what the drawer *should* contain (`expectedCash = openingCash + cash revenue − expenses`) and flags any **variance** — a shortfall (critical) or overage (warning) — the actual point of a daily cash-closing report. Petty-cash **expenses** paid out of the till during a shift require an amount and a reason, and only exist while the shift is `OPEN`.
+
+Each shift also tracks **staff attendance** (present / late / absent / left-early, with check-in/out times), editable only while the shift is `OPEN`. Closing a shift returns the full picture: revenue with payment-method breakdown, expenses, and the cash reconciliation. `GET /shifts/report/daily/:branchId` rolls all of a day's shifts into attendance, revenue, expense, and variance totals.
+
+**Shift lifecycle:** `OPEN` → `CLOSED` (closed shifts, their attendance, and their expenses are read-only)
+
+→ See [docs/shifts.md](docs/shifts.md) for the full shift, gating, reconciliation, attendance, and expenses API reference.
 
 ---
 
@@ -323,6 +344,9 @@ All endpoints are versioned under:
 | `/api/v1/payroll` | Payroll |
 | `/api/v1/analytics` | Analytics |
 | `/api/v1/reports` | Branch & business financial reports |
+| `/api/v1/shifts` | Shift open/close, till reconciliation, daily shift report |
+| `/api/v1/shift-attendance` | Per-shift staff attendance |
+| `/api/v1/shift-expenses` | Per-shift petty-cash expenses |
 | `/api/v1/plans` | Plans |
 | `/api/v1/subscriptions` | Subscriptions |
 | `/api/v1/storage-usage` | Storage usage |

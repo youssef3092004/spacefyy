@@ -13,6 +13,7 @@ import { verifyToken } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import { cacheMiddleware } from "../middleware/cache.js";
+import { requireOpenShift } from "../utils/requireOpenShift.js";
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.post(
   verifyToken,
   checkPermission("CREATE-INVOICES"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  requireOpenShift(),
   createInvoice,
 );
 
@@ -29,22 +31,25 @@ router.post(
   verifyToken,
   checkPermission("CREATE-INVOICES"),
   checkOwnership({ model: "order", paramId: "orderId", scope: "branch" }),
+  requireOpenShift(),
   createOrderInvoice,
 );
 
 router.patch(
-  "/payById/:invoiceId/:paymentMethod",
+  "/payById/:invoiceId",
   verifyToken,
   checkPermission("UPDATE-INVOICES"),
   checkOwnership({ model: "invoice", paramId: "invoiceId", scope: "branch" }),
+  requireOpenShift(),
   payInvoiceById,
 );
 
 router.patch(
-  "/pay/:visitId/:paymentMethod",
+  "/pay/:visitId",
   verifyToken,
   checkPermission("UPDATE-INVOICES"),
   checkOwnership({ model: "visit", paramId: "visitId", scope: "branch" }),
+  requireOpenShift(),
   payInvoice,
 );
 

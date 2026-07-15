@@ -3,6 +3,7 @@ import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
 import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
 import { applyBothDiscounts, sumItems } from "./order.js";
+import { assertOpenShift } from "../utils/requireOpenShift.js";
 
 const FINAL_ORDER_STATUSES = new Set(["COMPLETED", "INVOICED"]);
 
@@ -108,11 +109,13 @@ const ensureOrderItemExists = async (orderItemId) => {
         select: {
           id: true,
           status: true,
+          branchId: true,
           totalPrice: true,
           discountType: true,
           discountAmount: true,
           customerDiscountType: true,
           customerDiscountAmount: true,
+          visit: { select: { branchId: true } },
         },
       },
     },
@@ -208,6 +211,8 @@ export const createOrderItem = async (req, res, next) => {
         new AppError("Product and order must belong to the same branch", 400),
       );
     }
+
+    await assertOpenShift(orderBranchId, req.user?.roleName);
 
     const unitPrice = Number(product.price);
     const lineTotal = unitPrice * parsedQuantity;
@@ -426,6 +431,10 @@ export const updateOrderItemQuantity = async (req, res, next) => {
     const newQuantity = parsePositiveInt(quantity, "quantity");
 
     const currentItem = await ensureOrderItemExists(orderItemId);
+    await assertOpenShift(
+      currentItem.order.branchId ?? currentItem.order.visit?.branchId,
+      req.user?.roleName,
+    );
 
     const oldQuantity = currentItem.quantity;
     const diff = newQuantity - oldQuantity;
@@ -522,6 +531,10 @@ export const deleteOrderItem = async (req, res, next) => {
     }
 
     const item = await ensureOrderItemExists(orderItemId);
+    await assertOpenShift(
+      item.order.branchId ?? item.order.visit?.branchId,
+      req.user?.roleName,
+    );
 
     await prisma.$transaction(async (tx) => {
       await tx.product.update({

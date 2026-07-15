@@ -31,6 +31,8 @@ const componentSelect = {
   unitPrice: true,
   quantity: true,
   gamesCount: true,
+  players: true,
+  modeLabel: true,
   startedAt: true,
   endedAt: true,
   durationMinutes: true,
@@ -318,6 +320,147 @@ export const getComponentsBySession = async (req, res, next) => {
     });
 
     res.status(200).json({ success: true, data: components });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PATCH /sessions/change-players/:sessionId
+// Changes the player count (play mode) of the session's active device/unit
+// mid-session: closes the current segment at `now` (billing it over its own
+// window) and opens a fresh segment at the new player count / rate starting the
+// same instant. The physical resource stays continuously in use — it is
+// deliberately NOT released/re-reserved, so it can't be booked by anyone else
+// during the swap and there's no release/reserve race.
+export const changeSessionPlayers = async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const { players, resourceId, modeLabel } = req.body ?? {};
+
+    const playersNum = Number(players);
+    if (!Number.isInteger(playersNum) || playersNum <= 0) {
+      return next(new AppError("players must be a positive integer", 400));
+    }
+
+    const session = await getActiveSessionOrThrow(sessionId);
+
+    const activeSegments = await prisma.sessionComponent.findMany({
+      where: {
+        sessionId,
+        resourceType: { in: ["DEVICE", "UNIT"] },
+        endedAt: null,
+        ...(resourceId ? { resourceId } : {}),
+      },
+      select: componentSelect,
+    });
+
+    if (activeSegments.length === 0) {
+      return next(
+        new AppError("No active device or unit to change the player mode for", 400),
+      );
+    }
+    if (activeSegments.length > 1) {
+      return next(
+        new AppError(
+          "Multiple active devices/units in this session — specify resourceId",
+          400,
+        ),
+      );
+    }
+
+    const target = activeSegments[0];
+
+    if ((target.players ?? null) === playersNum) {
+      return next(new AppError("Session is already at this player count", 400));
+    }
+
+    const now = new Date();
+    if (now <= new Date(target.startedAt)) {
+      return next(
+        new AppError("Current segment has not started yet; cannot switch mode", 400),
+      );
+    }
+
+    // Close out the current segment over its own window.
+    const durationMinutes = calculateDurationMinutes(target.startedAt, now);
+    const closedTotal = calculateComponentPrice({
+      priceType: target.priceType,
+      unitPrice: target.unitPrice,
+      quantity: target.quantity,
+      gamesCount: target.gamesCount,
+      startedAt: target.startedAt,
+      endedAt: now,
+    });
+
+    // Resolve the rate for the new player count (rule band → base-price fallback).
+    const [pricingRule, resourcePricing] = await Promise.all([
+      resolvePricingRule({
+        resourceType: target.resourceType,
+        resourceId: target.resourceId,
+        branchId: session.branchId,
+        players: playersNum,
+      }),
+      resolveResourcePricing({
+        resourceType: target.resourceType,
+        resourceId: target.resourceId,
+        branchId: session.branchId,
+      }),
+    ]);
+
+    const newPriceType = pricingRule
+      ? mapPricingRuleToPriceType(pricingRule)
+      : resourcePricing.priceType;
+    const newUnitPrice = pricingRule
+      ? parseMoney(pricingRule.price, "pricingRule.price")
+      : resourcePricing.price;
+    // Explicit label from the request wins; else a matched rule's name; else null.
+    const explicitLabel =
+      modeLabel != null && String(modeLabel).trim()
+        ? String(modeLabel).trim()
+        : null;
+    const newModeLabel = explicitLabel ?? pricingRule?.name ?? null;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const endedSegment = await tx.sessionComponent.update({
+        where: { id: target.id },
+        data: { endedAt: now, durationMinutes, totalPrice: closedTotal },
+        select: componentSelect,
+      });
+
+      const newSegment = await tx.sessionComponent.create({
+        data: {
+          sessionId,
+          branchId: session.branchId,
+          resourceType: target.resourceType,
+          resourceId: target.resourceId,
+          pricingRuleId: pricingRule?.id ?? null,
+          priceType: newPriceType,
+          unitPrice: newUnitPrice,
+          quantity: Math.max(1, target.quantity),
+          gamesCount: 0,
+          players: playersNum,
+          modeLabel: newModeLabel,
+          startedAt: now,
+          totalPrice: 0,
+        },
+        select: componentSelect,
+      });
+
+      const sessionTotal = await recalculateSessionTotal(tx, sessionId);
+      return { endedSegment, newSegment, sessionTotal };
+    });
+
+    emitSpaceOverviewUpdate(session.branchId, {
+      action: "SESSION_MODE_CHANGED",
+      sessionId,
+      resourceId: target.resourceId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Player mode changed",
+      data: result,
+    });
   } catch (error) {
     next(error);
   }

@@ -93,6 +93,9 @@ import orderItemRouter from "./routes/orderItem.js";
 import invoiceRouter from "./routes/invoice.js";
 import analyticsRouter from "./routes/analytics.js";
 import reportRouter from "./routes/report.js";
+import shiftRouter from "./routes/shift.js";
+import shiftAttendanceRouter from "./routes/shiftAttendance.js";
+import shiftExpenseRouter from "./routes/shiftExpense.js";
 import webSocketSpaceOverViewRouter from "./routes/webSocketSpaceOverView.js";
 
 import seedRouter from "./seeds/permissions.js";
@@ -129,6 +132,9 @@ app.use("/api/v1/order-items", orderItemRouter);
 app.use("/api/v1/invoices", invoiceRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/reports", reportRouter);
+app.use("/api/v1/shifts", shiftRouter);
+app.use("/api/v1/shift-attendance", shiftAttendanceRouter);
+app.use("/api/v1/shift-expenses", shiftExpenseRouter);
 app.use("/api/v1/websocket-space-overview", webSocketSpaceOverViewRouter);
 
 app.use("/api/v1/seed-permissions", seedRouter);

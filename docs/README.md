@@ -145,7 +145,7 @@ The API runs on `http://localhost:3000/api/v1`.
 |---|---|
 | **Visit** | id, branchId, customerId, status (ACTIVE/INVOICED/CANCELLED), totalPrice (sessions + orders), startedAt, endedAt, durationMinutes, cancelledAt, cancelledById |
 | **Session** | id, branchId, visitId, status (ACTIVE/ENDED/CANCELLED), totalPrice (sum of components), startedAt, endedAt, durationMinutes |
-| **SessionComponent** | id, sessionId, resourceType (SPACE/DEVICE/UNIT/EQUIPMENT), resourceId, priceType, unitPrice (snapshot), quantity, gamesCount, startedAt, endedAt, durationMinutes, totalPrice |
+| **SessionComponent** | id, sessionId, resourceType (SPACE/DEVICE/UNIT/EQUIPMENT), resourceId, priceType, unitPrice (snapshot), quantity, gamesCount, players?, modeLabel? (device/unit mode label e.g. "SGL"/"DBL" — explicit from request, else matched rule name), startedAt, endedAt, durationMinutes, totalPrice |
 
 ### Products & Orders
 
@@ -172,6 +172,16 @@ The API runs on `http://localhost:3000/api/v1`.
 | **StaffProfile** | id, userId, branchId, baseSalary, hireDate, position, department |
 | **NationalId** | id, staffProfileId, number, frontImage, backImage |
 | **Payroll** | id, staffProfileId, month, year, grossSalary, bonus, overtime, deductions, netSalary, method (CASH/BANK/INSTAPAY/CARD), status (PENDING/APPROVED/PAID) |
+
+### Shifts & Attendance
+
+| Model | Key Fields |
+|---|---|
+| **Shift** | id, branchId, date (local day), shiftNumber (per branch/day), status (OPEN/CLOSED), openedAt, closedAt, openedById, closedById, handoverNotes, incidentNotes, openingCash, actualCash?, expectedCash?, variance? — `@@unique([branchId, date, shiftNumber])` |
+| **ShiftAttendance** | id, shiftId, staffProfileId, status (PRESENT/LATE/ABSENT/LEFT_EARLY), checkInTime, checkOutTime, notes — `@@unique([shiftId, staffProfileId])` |
+| **ShiftExpense** | id, shiftId, createdById, category, amount, reason, createdAt — petty-cash payouts during a shift, feeds `Shift.expectedCash` |
+| **Plan** (new field) | `maxShiftsPerDay Int?` — max shifts a branch may open per day (`null` = unlimited) |
+| **Invoice** (new field) | `shiftId String?` — the shift that was open when the invoice was paid (set at payment time, not creation) |
 
 ---
 
@@ -354,13 +364,14 @@ Real-time overview push over Socket.IO is served under `/websocket-space-overvie
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/create/:branchId` | Create session (smart mode or manual components) |
+| POST | `/create/:branchId` | Create session (smart mode or manual components). Optional body `players` + `modeLabel` label the device/unit's mode (e.g. `"SGL"`) |
 | GET | `/getAll/:branchId` | List sessions for branch (paginated) |
 | GET | `/getById/:sessionId` | Get session with all components |
 | GET | `/visit/:branchId/:visitId` | Get all sessions for a visit |
 | PATCH | `/update/:sessionId` | Update bookingId, currency, startedAt |
 | PATCH | `/end/:sessionId` | End session, calculate prices |
 | PATCH | `/cancel/:sessionId` | Cancel session (zero all prices) |
+| PATCH | `/change-players/:sessionId` | Switch the active device/unit's player mode mid-session — ends the current segment and opens a new timed one at the new count. Body `{ players, modeLabel?, resourceId? }` (`modeLabel` = your own label e.g. `"DBL"`; `resourceId` only if >1 active device). Uses server `now` as the switch time. Gated by `UPDATE-SESSIONS` + open shift. See [pricingSystem.md](pricingSystem.md#player-count-mode-pricing) |
 | DELETE | `/delete/:sessionId` | Soft delete session |
 
 ### Session Components — `/session-components`
@@ -430,6 +441,36 @@ Every order response carries an `invoice` summary: `{ isInvoiced, invoiceId, sta
 | GET | `/business/:businessId` | Business-wide report (owner/DEVELOPER only): same sections as totals plus a per-branch breakdown with revenue share and per-branch insights for comparing branches |
 
 See [reports.md](reports.md) for the full reference including response shapes, insight rules, payroll visibility, and the snapshot/fallback mechanics.
+
+No sale, booking, session, order, or payment can happen without an open shift (`OWNER`/`DEVELOPER` bypass) — see [shifts.md](shifts.md) for the full list of gated routes.
+
+### Shifts — `/shifts`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/open/:branchId` | Open a new shift for the branch (creates the row; `shiftNumber` auto-assigned). Body requires `openingCash` (≥ 0). Blocked if another shift is open or the plan's `maxShiftsPerDay` is reached |
+| POST | `/close/:shiftId` | Close an open shift. Body requires `handoverNotes` and `actualCash` (+ optional `incidentNotes`). Returns the shift with `revenue`, `expenses`, computed `expectedCash`/`variance`, and a cash-variance `insights` flag if any |
+| GET | `/today/:branchId` | All of today's shifts for the branch with attendance summaries and cash fields |
+| GET | `/getById/:shiftId` | One shift with attendance, `revenue`, and `expenses` (live window while open) |
+| GET | `/report/daily/:branchId?date=` | Daily report: every shift for the day + attendance/revenue/expense/variance totals |
+
+### Shift Attendance — `/shift-attendance`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/create/:shiftId` | Add a staff member to an OPEN shift (`{ staffProfileId, status?, checkInTime?, notes? }`) |
+| PATCH | `/update/:shiftId/:attendanceId` | Update status / check-out / notes on an OPEN shift |
+| GET | `/getAll/:shiftId` | List attendance for a shift |
+
+### Shift Expenses — `/shift-expenses`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/create/:shiftId` | Record a petty-cash payout on an OPEN shift (`{ amount, reason, category? }` — `amount` > 0 and `reason` required) |
+| GET | `/getAll/:shiftId` | List expenses for a shift, plus their `total` |
+| DELETE | `/delete/:shiftId/:expenseId` | Remove an expense (only while the shift is OPEN) |
+
+Attendance is editable only while the shift is OPEN. See [shifts.md](shifts.md) for the full reference.
 
 ### Staff & Payroll — `/staff-profiles`, `/payrolls`
 
@@ -635,5 +676,6 @@ ENABLE_SUBSCRIPTION_CRON=false
 | [order.md](./order.md) | Order lifecycle and structure |
 | [subscription.md](./subscription.md) | Plans + Subscriptions API reference and lifecycle |
 | [reports.md](./reports.md) | Branch & business financial reports — income, payment breakdown, payroll cost, insights, Daily Closing Report |
+| [shifts.md](./shifts.md) | Manual shift lifecycle, shift gating, plan-gated shift limits, till reconciliation, staff attendance, petty-cash expenses, and the shift closing report |
 | [RBAC.md](../RBAC.md) | Full authentication and authorization specification |
 | [EQUIPMENT_API_DOCUMENTATION.json](./EQUIPMENT_API_DOCUMENTATION.json) | Equipment endpoint specs (Postman format) |
