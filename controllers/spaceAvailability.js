@@ -1,6 +1,6 @@
 import { prisma } from "../configs/db.js";
-import { redisClient } from "../configs/redis.js";
 import { AppError } from "../utils/appError.js";
+import { invalidateResourceCaches } from "../utils/cacheInvalidation.js";
 
 // High-performance real-time availability check for spaces, devices, and units
 // Used by frontend before creating reservations (NO CACHE for accuracy)
@@ -23,6 +23,7 @@ export const checkSpaceAvailability = async (req, res, next) => {
         isBusy: true,
         isActive: true,
         capacity: true,
+        bookingCapacity: true,
         availableNumber: true,
         type: true,
       },
@@ -42,6 +43,7 @@ export const checkSpaceAvailability = async (req, res, next) => {
         isBusy: space.isBusy,
         isActive: space.isActive,
         capacity: space.capacity,
+        bookingCapacity: space.bookingCapacity,
         availableNumber: space.availableNumber,
         type: space.type,
       },
@@ -111,10 +113,13 @@ export const checkUnitAvailability = async (req, res, next) => {
   }
 };
 
-// Cache invalidation utility
+// Cache invalidation utility.
+// Previously this deleted only `spaces:overview:branchId=<id>` — a key nothing
+// ever writes, since the overview route has no cacheMiddleware — so it was a
+// no-op. It now clears the resource caches that actually exist for the branch.
 export const invalidateSpaceCache = async (branchId) => {
   try {
-    await redisClient.del(`spaces:overview:branchId=${branchId}`);
+    await invalidateResourceCaches(branchId);
   } catch (error) {
     console.error("⚠️  Cache invalidation error:", error.message);
     // Don't fail the request if cache invalidation fails

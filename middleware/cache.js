@@ -2,6 +2,9 @@ import { redisClient } from "../configs/redis.js";
 import process from "process";
 import { indexCacheKeyByRequest } from "../utils/cacheInvalidation.js";
 
+// Fallback expiry when the configured TTL env var is missing or unparseable.
+const DEFAULT_TTL = 300;
+
 export const cacheMiddleware = (keyBuilder, type) => {
   return async (req, res, next) => {
     try {
@@ -42,17 +45,15 @@ export const cacheMiddleware = (keyBuilder, type) => {
         // Only cache successful responses
         if (body.status === "success" || body.success === true) {
           const ttlEnvKey = `${type}`;
-          const ttl = parseInt(process.env[ttlEnvKey]);
+          const parsedTtl = parseInt(process.env[ttlEnvKey]);
+          // Never write without an expiry: a missing or malformed TTL env var
+          // used to fall through to a plain SET, making that response cached
+          // permanently and impossible to age out.
+          const ttl = parsedTtl && parsedTtl > 0 ? parsedTtl : DEFAULT_TTL;
 
-          if (ttl && ttl > 0) {
-            redisClient.setEx(key, ttl, JSON.stringify(body)).catch((error) => {
-              console.error("Cache write failed:", error);
-            });
-          } else {
-            redisClient.set(key, JSON.stringify(body)).catch((error) => {
-              console.error("Cache write failed:", error);
-            });
-          }
+          redisClient.setEx(key, ttl, JSON.stringify(body)).catch((error) => {
+            console.error("Cache write failed:", error);
+          });
 
           indexCacheKeyByRequest(req, key).catch((error) => {
             console.error("Cache key indexing failed:", error);

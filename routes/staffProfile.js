@@ -30,13 +30,15 @@ router.get(
   "/getAll",
   verifyToken,
   checkPermission("VIEW-STAFF-PROFILES"),
+  // The result set is scoped to the caller's branches, so the caller is part
+  // of the key — otherwise one tenant's staff list is served to another.
   cacheMiddleware(
     (req) =>
-      `staffProfiles:page=${req.query.page || 1}:limit=${
-        req.query.limit || 10
-      }:sort=${req.query.sort || "createdAt"}:order=${
-        req.query.order || "desc"
-      }`,
+      `staffProfiles:user=${req.user?.id || req.user?.userId}:page=${
+        req.query.page || 1
+      }:limit=${req.query.limit || 10}:sort=${
+        req.query.sort || "createdAt"
+      }:order=${req.query.order || "desc"}`,
     "TTL_LIST",
   ),
   getAllStaffProfiles,
@@ -44,28 +46,32 @@ router.get(
 router.get(
   "/getById/:id",
   verifyToken,
-  cacheMiddleware((req) => `staffProfile:${req.params.id}`, "TTL_BY_ID"),
   checkPermission("VIEW-STAFF-PROFILES"),
   checkOwnership({
     model: "staffProfile",
     paramId: "id",
     scope: "branch",
   }),
+  // Cache must come last: a hit short-circuits with res.json(), so anything
+  // registered after it never runs.
+  cacheMiddleware((req) => `staffProfile:${req.params.id}`, "TTL_BY_ID"),
   getStaffProfileById,
 );
 router.get(
   "/getByBranchId/:branchId",
   verifyToken,
-  cacheMiddleware(
-    (req) => `staffProfilesBranch:${req.params.branchId}`,
-    "TTL_BY_ID",
-  ),
   checkPermission("VIEW-STAFF-PROFILES", true),
   checkOwnership({
     model: "branch",
     paramId: "branchId",
     scope: "branch",
   }),
+  // Cache must come last: a hit short-circuits with res.json(), so anything
+  // registered after it never runs.
+  cacheMiddleware(
+    (req) => `staffProfilesBranch:${req.params.branchId}`,
+    "TTL_BY_ID",
+  ),
   getStaffProfilesByBranchId,
 );
 router.put(
@@ -100,22 +106,27 @@ router.get(
   "/getByUserId/:userId",
   verifyToken,
   checkPermission("VIEW-STAFF-PROFILES"),
-  cacheMiddleware(
-    (req) => `staffProfileUser:${req.params.userId}`,
-    "TTL_BY_ID",
-  ),
   checkOwnership({
     model: "staffProfile",
     paramId: "userId",
     scope: "branch",
   }),
+  // Cache must come last: a hit short-circuits with res.json(), so anything
+  // registered after it never runs.
+  cacheMiddleware(
+    (req) => `staffProfileUser:${req.params.userId}`,
+    "TTL_BY_ID",
+  ),
   getStaffProfileByUserId,
 );
 router.get(
   "/getStaffProfilesCount",
   verifyToken,
   checkPermission("VIEW-STAFF-PROFILES"),
-  cacheMiddleware(() => `staffProfilesCount`, "TTL_BY_ID"),
+  cacheMiddleware(
+    (req) => `staffProfilesCount:user=${req.user?.id || req.user?.userId}`,
+    "TTL_BY_ID",
+  ),
   getStaffProfilesCount,
 );
 router.put(

@@ -259,10 +259,16 @@ export const getPayrolls = async (req, res, next) => {
     if (!branch) {
       return next(new AppError(messages.BRANCH_NOT_FOUND.en, 404));
     }
-    const { page, limit, skip, order, sort } = pagination(req);
+    // Payroll has no name/email column, so the default sort list would let
+    // ?sort=email through to Prisma and 500.
+    const { page, limit, skip, order, sort } = pagination(req, {
+      allowedSortFields: ["month", "year", "netSalary", "status"],
+    });
     //! fix the filters as a many endpoints
     const { status, month, year } = req.query;
-    const filter = {};
+    // Scope to the requested branch. Without this the endpoint returned every
+    // payroll row in the database regardless of branch or business.
+    const filter = { staffProfile: { branchId } };
     if (status) {
       const fixedStatus = fixStatus(status);
       if (!fixedStatus) {

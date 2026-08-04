@@ -11,6 +11,9 @@ import {
 
 const PAYROLL_VISIBLE_ROLES = new Set(["OWNER", "ADMIN", "DEVELOPER"]);
 const OVERDUE_DAYS = 14;
+// Two years — long enough for any year-over-year comparison, short enough that
+// one request cannot stream an unbounded slice of history.
+const MAX_RANGE_DAYS = 731;
 const PAYROLL_OVERDUE_CRITICAL_DAYS = 30;
 const PAYROLL_OVERDUE_WARNING_DAYS = 7;
 const NOT_FULL_PNL_NOTE =
@@ -60,6 +63,16 @@ const resolveDateRange = (startDate, endDate) => {
 
   if (start > end) {
     throw new AppError("startDate must be before endDate", 400);
+  }
+
+  // Without a cap, startDate=2015-01-01 pulls a decade of invoices into one
+  // request and can exhaust the connection pool for every other endpoint.
+  const spanDays = Math.ceil((end.getTime() - start.getTime()) / 86_400_000);
+  if (spanDays > MAX_RANGE_DAYS) {
+    throw new AppError(
+      `Date range cannot exceed ${MAX_RANGE_DAYS} days. Requested ${spanDays}.`,
+      400,
+    );
   }
 
   return { start, end };
@@ -141,9 +154,21 @@ const getIncomeMetrics = async (branchIds, start, end) => {
   let usedSnapshot = false;
 
   if (hasPastPortion) {
-    const expectedDays = Math.round((todayStart.getTime() - rangeStartDay.getTime()) / 86400000);
+    // Snapshots cover whole past days. The exclusive upper bound is the day
+    // AFTER the requested end (so the end day itself is included), capped at
+    // today. Using todayStart unconditionally made every historical report run
+    // through to the present day.
+    const dayAfterRangeEnd = addDays(startOfUTCDay(end), 1);
+    const snapshotEnd =
+      dayAfterRangeEnd < todayStart ? dayAfterRangeEnd : todayStart;
+    const expectedDays = Math.round(
+      (snapshotEnd.getTime() - rangeStartDay.getTime()) / 86400000,
+    );
     const rows = await prisma.branchDailyReport.findMany({
-      where: { branchId: { in: branchIds }, date: { gte: rangeStartDay, lt: todayStart } },
+      where: {
+        branchId: { in: branchIds },
+        date: { gte: rangeStartDay, lt: snapshotEnd },
+      },
     });
 
     if (expectedDays > 0 && rows.length === expectedDays * branchIds.length) {
@@ -183,46 +208,50 @@ const getIncomeMetrics = async (branchIds, start, end) => {
 // ─── Customers (always live — dedup can't be safely summed across days or branches) ──
 
 const getCustomerMetrics = async (branchIds, start, end) => {
-  const [newCustomers, activeCustomerRows] = await Promise.all([
+  const [newCustomers, activeCustomerGroups] = await Promise.all([
     prisma.customerBranch.count({
       where: { branchId: { in: branchIds }, registeredAt: { gte: start, lte: end } },
     }),
-    prisma.visit.findMany({
+    // groupBy, not findMany+.length: the old form streamed one row per distinct
+    // customer into memory only to count them.
+    prisma.visit.groupBy({
+      by: ["customerId"],
       where: { branchId: { in: branchIds }, startedAt: { gte: start, lte: end } },
-      select: { customerId: true },
-      distinct: ["customerId"],
     }),
   ]);
-  return { newCustomers, activeCustomers: activeCustomerRows.length };
+  return { newCustomers, activeCustomers: activeCustomerGroups.length };
 };
 
 // ─── Outstanding (always live — a point-in-time balance, not a period flow) ──
 
 const getOutstanding = async (branchIds) => {
-  const unpaidInvoices = await prisma.invoice.findMany({
-    where: {
-      status: "UNPAID",
-      OR: [{ branchId: { in: branchIds } }, { visit: { branchId: { in: branchIds } } }],
-    },
-    select: { finalAmount: true, createdAt: true },
-  });
-
   const overdueThreshold = new Date(Date.now() - OVERDUE_DAYS * 24 * 60 * 60 * 1000);
-  let unpaidInvoiceTotal = 0;
-  let overdueCount = 0;
-  let overdueTotal = 0;
+  const unpaidWhere = {
+    status: "UNPAID",
+    OR: [{ branchId: { in: branchIds } }, { visit: { branchId: { in: branchIds } } }],
+  };
 
-  for (const inv of unpaidInvoices) {
-    const amt = Number(inv.finalAmount ?? 0);
-    unpaidInvoiceTotal += amt;
-    if (inv.createdAt < overdueThreshold) {
-      overdueCount += 1;
-      overdueTotal += amt;
-    }
-  }
+  // Two aggregates instead of loading every unpaid invoice ever issued into
+  // memory just to sum it — that query had no date bound at all.
+  const [all, overdue] = await Promise.all([
+    prisma.invoice.aggregate({
+      where: unpaidWhere,
+      _sum: { finalAmount: true },
+      _count: { _all: true },
+    }),
+    prisma.invoice.aggregate({
+      where: { ...unpaidWhere, createdAt: { lt: overdueThreshold } },
+      _sum: { finalAmount: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const unpaidInvoiceTotal = Number(all._sum.finalAmount ?? 0);
+  const overdueCount = overdue._count._all;
+  const overdueTotal = Number(overdue._sum.finalAmount ?? 0);
 
   return {
-    unpaidInvoiceCount: unpaidInvoices.length,
+    unpaidInvoiceCount: all._count._all,
     unpaidInvoiceTotal: toNum(unpaidInvoiceTotal),
     overdueCount,
     overdueTotal: toNum(overdueTotal),
@@ -645,33 +674,36 @@ export const getBusinessReport = async (req, res, next) => {
 
     const businessAverageRevenue = branchIds.length > 0 ? totals.income.totalRevenue / branchIds.length : 0;
 
-    const perBranch = await Promise.all(
-      branches.map(async (branch) => {
-        const branchMetrics = await computeBranchMetrics({
-          branchIds: [branch.id],
-          start,
-          end,
-          roleName,
-          includeDetails: false,
-        });
-        const insights = computeInsights(branchMetrics, null, {
-          branchLabel: branch.name,
-          branchCount: branchIds.length,
-          businessAverageRevenue,
-        });
-        return {
-          branchId: branch.id,
-          branchName: branch.name,
-          isActive: branch.isActive,
-          shareOfBusinessRevenuePercent:
-            totals.income.totalRevenue > 0
-              ? toNum((branchMetrics.income.totalRevenue / totals.income.totalRevenue) * 100)
-              : 0,
-          ...branchMetrics,
-          insights,
-        };
-      }),
-    );
+    // Sequential on purpose. Fanning every branch out concurrently issued
+    // 100+ simultaneous queries on a 20-branch business — enough to exhaust
+    // the connection pool and take unrelated endpoints down with it.
+    const perBranch = [];
+    for (const branch of branches) {
+      const branchMetrics = await computeBranchMetrics({
+        branchIds: [branch.id],
+        start,
+        end,
+        roleName,
+        includeDetails: false,
+      });
+      const insights = computeInsights(branchMetrics, null, {
+        branchLabel: branch.name,
+        branchCount: branchIds.length,
+        businessAverageRevenue,
+      });
+
+      perBranch.push({
+        branchId: branch.id,
+        branchName: branch.name,
+        isActive: branch.isActive,
+        shareOfBusinessRevenuePercent:
+          totals.income.totalRevenue > 0
+            ? toNum((branchMetrics.income.totalRevenue / totals.income.totalRevenue) * 100)
+            : 0,
+        ...branchMetrics,
+        insights,
+      });
+    }
 
     const businessInsights = computeInsights(totals, previousTotals);
 

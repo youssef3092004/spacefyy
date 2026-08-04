@@ -36,9 +36,11 @@ router.get(
 router.get(
   "/getById/:id",
   verifyToken,
-  cacheMiddleware((req) => `business:${req.params.id}`, "TTL_BY_ID"),
   checkPermission("VIEW-BUSINESSES"),
   checkOwnership({ model: "business", paramId: "id", scope: "business" }),
+  // Cache must come last: a hit short-circuits with res.json(), so anything
+  // registered after it never runs.
+  cacheMiddleware((req) => `business:${req.params.id}`, "TTL_BY_ID"),
   getBusinessById,
 );
 router.put(

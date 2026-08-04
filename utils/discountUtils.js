@@ -1,5 +1,4 @@
 import { prisma } from "../configs/db.js";
-import { AppError } from "./appError.js";
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -27,10 +26,35 @@ export const isDiscountActiveNow = (customer) => {
   return true;
 };
 
+export const MAX_PERCENT_DISCOUNT = 100;
+
+// A PERCENT amount above 100 would flip the sign of the remainder; it is far
+// more likely a typo (200 meaning 20) than an intent to pay nothing, so it is
+// rejected at the validation boundary and clamped here as a last resort.
 export const applyDiscount = (price, type, amount) => {
   if (!amount || amount <= 0) return price;
-  const raw = type === "PERCENT" ? price * (1 - amount / 100) : price - amount;
+  const raw =
+    type === "PERCENT"
+      ? price * (1 - Math.min(amount, MAX_PERCENT_DISCOUNT) / 100)
+      : price - amount;
   return Math.max(0, Math.round((raw + Number.EPSILON) * 100) / 100);
+};
+
+// Shared by every endpoint that accepts a discount pair.
+export const validateDiscountInput = (type, amount) => {
+  if (type !== undefined && type !== null && !["FLAT", "PERCENT"].includes(type)) {
+    return "discountType must be FLAT or PERCENT";
+  }
+  if (amount === undefined || amount === null) return null;
+
+  const parsed = Number(amount);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return "discountAmount must be a non-negative number";
+  }
+  if (type === "PERCENT" && parsed > MAX_PERCENT_DISCOUNT) {
+    return "A PERCENT discountAmount cannot exceed 100";
+  }
+  return null;
 };
 
 export const resolveCustomerDiscount = async (customerId) => {
@@ -53,12 +77,10 @@ export const resolveCustomerDiscount = async (customerId) => {
 
   if (!customer) return { type: "FLAT", amount: 0 };
 
-  if (customer.isBlocked) {
-    throw new AppError(
-      `Customer is blocked${customer.blockedReason ? `: ${customer.blockedReason}` : ""}`,
-      403,
-    );
-  }
+  // A blocked customer simply forfeits their discount. Throwing here made an
+  // open visit impossible to close — the block is enforced at visit START
+  // (ensureCanStartVisit), which is the point where it can still be acted on.
+  if (customer.isBlocked) return { type: "FLAT", amount: 0 };
 
   if (isDiscountActiveNow(customer)) {
     return { type: customer.discountType, amount: Number(customer.discountAmount) };

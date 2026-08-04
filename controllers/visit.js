@@ -5,15 +5,18 @@ import { ensureCanStartVisit } from "../utils/visitStatusLock.js";
 import {
   applyDiscount,
   resolveCustomerDiscount,
+  validateDiscountInput,
 } from "../utils/discountUtils.js";
 import { formatOrder, ORDER_INCLUDE } from "./order.js";
 import {
   calculateComponentPrice,
   calculateDurationMinutes,
   roundMoney,
+  roundToNearestTen,
   serializeComponent,
 } from "../utils/sessionUtils.js";
 import { releaseResourceAvailability } from "../utils/resourceAvailability.js";
+import { invalidateResourceCachesSafe } from "../utils/cacheInvalidation.js";
 
 const visitSelect = {
   id: true,
@@ -49,14 +52,10 @@ const formatVisitInvoiceSummary = (invoice) => ({
 const validateManualDiscount = (discountType, discountAmount) => {
   if (!discountType && !discountAmount) return { type: "FLAT", amount: 0 };
 
-  if (discountType && !["FLAT", "PERCENT"].includes(discountType)) {
-    throw new AppError("discountType must be FLAT or PERCENT", 400);
-  }
-  const amt = Number(discountAmount ?? 0);
-  if (isNaN(amt) || amt < 0) {
-    throw new AppError("discountAmount must be a non-negative number", 400);
-  }
-  return { type: discountType || "FLAT", amount: amt };
+  const error = validateDiscountInput(discountType, discountAmount);
+  if (error) throw new AppError(error, 400);
+
+  return { type: discountType || "FLAT", amount: Number(discountAmount ?? 0) };
 };
 
 export const getAllByBranchId = async (req, res, next) => {
@@ -158,11 +157,16 @@ export const startVisit = async (req, res, next) => {
     const [branch, customer, latestVisit] = await Promise.all([
       prisma.branch.findUnique({
         where: { id: branchId },
-        select: { id: true },
+        select: { id: true, businessId: true },
       }),
       prisma.customer.findUnique({
         where: { id: customerId },
-        select: { id: true, isBlocked: true, blockedReason: true },
+        select: {
+          id: true,
+          businessId: true,
+          isBlocked: true,
+          blockedReason: true,
+        },
       }),
       prisma.visit.findFirst({
         where: { branchId, customerId },
@@ -173,6 +177,15 @@ export const startVisit = async (req, res, next) => {
 
     if (!branch) return next(new AppError("Branch not found", 404));
     if (!customer) return next(new AppError("Customer not found", 404));
+
+    // Customer and branch must belong to the same business. Nothing in the
+    // schema enforces this (CustomerBranch carries two independent FKs), so a
+    // cross-tenant pairing would otherwise be silently persisted.
+    if (customer.businessId !== branch.businessId) {
+      return next(
+        new AppError("Customer does not belong to this branch's business", 400),
+      );
+    }
 
     if (customer.isBlocked) {
       return next(
@@ -185,46 +198,51 @@ export const startVisit = async (req, res, next) => {
 
     ensureCanStartVisit(latestVisit?.status);
 
-    const visit = await prisma.visit.create({
-      data: {
-        branchId,
-        customerId,
-        status: "ACTIVE",
-        startedAt: startedAt ? new Date(startedAt) : new Date(),
-        totalPrice: 0,
-        ...(notes ? { notes: String(notes) } : {}),
-      },
-      select: {
-        id: true,
-        branchId: true,
-        customerId: true,
-        customer: { select: { id: true, name: true } },
-        status: true,
-        startedAt: true,
-        endedAt: true,
-        durationMinutes: true,
-        totalPrice: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    // Auto-link customer to branch; record firstVisitAt if not yet set.
-    const existingCB = await prisma.customerBranch.findUnique({
-      where: { customerId_branchId: { customerId, branchId } },
-      select: { firstVisitAt: true },
-    });
-
-    if (!existingCB) {
-      await prisma.customerBranch.create({
-        data: { customerId, branchId, firstVisitAt: visit.startedAt },
+    // The visit and its branch link are written together: a failure between
+    // them used to leave a committed visit with no CustomerBranch row.
+    const visit = await prisma.$transaction(async (tx) => {
+      const created = await tx.visit.create({
+        data: {
+          branchId,
+          customerId,
+          status: "ACTIVE",
+          startedAt: startedAt ? new Date(startedAt) : new Date(),
+          totalPrice: 0,
+          ...(notes ? { notes: String(notes) } : {}),
+        },
+        select: {
+          id: true,
+          branchId: true,
+          customerId: true,
+          customer: { select: { id: true, name: true } },
+          status: true,
+          startedAt: true,
+          endedAt: true,
+          durationMinutes: true,
+          totalPrice: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       });
-    } else if (!existingCB.firstVisitAt) {
-      await prisma.customerBranch.update({
+
+      // Upsert, not find-then-create: two concurrent first visits both saw no
+      // row and both inserted, and the unique constraint failed one of them
+      // after the visit had already been created.
+      await tx.customerBranch.upsert({
         where: { customerId_branchId: { customerId, branchId } },
-        data: { firstVisitAt: visit.startedAt },
+        create: { customerId, branchId, firstVisitAt: created.startedAt },
+        update: {},
       });
-    }
+
+      // Stamp firstVisitAt only if this is genuinely their first visit here
+      // (a customer registered at the desk has a row with firstVisitAt null).
+      await tx.customerBranch.updateMany({
+        where: { customerId, branchId, firstVisitAt: null },
+        data: { firstVisitAt: created.startedAt },
+      });
+
+      return created;
+    });
 
     res.status(201).json({
       success: true,
@@ -269,6 +287,7 @@ export const getVisitById = async (req, res, next) => {
                   quantity: true,
                   players: true,
                   modeLabel: true,
+                  gameModeId: true,
                   startedAt: true,
                   endedAt: true,
                   durationMinutes: true,
@@ -385,14 +404,17 @@ export const closeVisitCore = async (
 
   const endedAt = new Date();
 
-  // Auto-end any sessions that are still ACTIVE before calculating totals
+  // Auto-end any sessions that are still ACTIVE before calculating totals.
+  // ALL components are loaded, not just the open ones: components ended earlier
+  // (via endComponent or a change-players segment switch) already carry a price
+  // that must still count toward the session total. Filtering to open
+  // components here silently discarded that revenue.
   const activeSessions = await prisma.session.findMany({
     where: { visitId, status: "ACTIVE", deletedAt: null },
     select: {
       id: true,
       startedAt: true,
       components: {
-        where: { endedAt: null },
         select: {
           id: true,
           resourceType: true,
@@ -403,6 +425,8 @@ export const closeVisitCore = async (
           quantity: true,
           gamesCount: true,
           startedAt: true,
+          endedAt: true,
+          totalPrice: true,
         },
       },
     },
@@ -414,6 +438,15 @@ export const closeVisitCore = async (
         let sessionTotal = 0;
 
         for (const comp of session.components) {
+          // Already ended: keep the price it was billed at and do NOT release
+          // its resource again — the release happened when it was ended.
+          if (comp.endedAt) {
+            sessionTotal = roundMoney(
+              sessionTotal + Number(comp.totalPrice ?? 0),
+            );
+            continue;
+          }
+
           const compDuration = calculateDurationMinutes(
             comp.startedAt,
             endedAt,
@@ -484,18 +517,18 @@ export const closeVisitCore = async (
     customerDiscount.type,
     customerDiscount.amount,
   );
-  const finalAmount = applyDiscount(
-    afterCustomerDiscount,
-    manualDiscount.type,
-    manualDiscount.amount,
+  const finalAmount = roundToNearestTen(
+    applyDiscount(afterCustomerDiscount, manualDiscount.type, manualDiscount.amount),
   );
 
-  const fallbackDuration = Math.max(
+  // Elapsed wall-clock time, not the sum of session durations. Sessions run in
+  // parallel, so three concurrent 60-minute sessions summed to 180 minutes for
+  // a visit that lasted one hour — and any per-minute reporting on this field
+  // was 3x off.
+  const durationMinutes = Math.max(
     0,
     Math.round((endedAt.getTime() - visit.startedAt.getTime()) / 60000),
   );
-  const durationMinutes =
-    sessionTotals._sum.durationMinutes ?? fallbackDuration;
 
   const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.visit.updateMany({
@@ -543,6 +576,15 @@ export const closeVisitCore = async (
 
     return tx.visit.findUnique({ where: { id: visitId }, select: visitSelect });
   });
+
+  // Closing frees every resource the visit was holding. Done here rather than
+  // in the route handler so the invoice endpoint, which reuses this function,
+  // is covered too — the route-derived auto-invalidation cannot see these
+  // resources because /visits/close/:visitId carries no branchId.
+  invalidateResourceCachesSafe(
+    visit.branchId,
+    activeSessions.flatMap((s) => s.components ?? []),
+  );
 
   return result;
 };
@@ -618,7 +660,10 @@ export const cancelVisit = async (req, res, next) => {
       where: { visitId, status: "ACTIVE", deletedAt: null },
       select: {
         id: true,
+        // Only components still open: an ended one already released its
+        // resource, and re-releasing it overbooks the space.
         components: {
+          where: { endedAt: null },
           select: {
             id: true,
             resourceType: true,
@@ -643,8 +688,8 @@ export const cancelVisit = async (req, res, next) => {
               branchId: comp.branchId,
             });
           }
-          await tx.session.update({
-            where: { id: session.id },
+          await tx.session.updateMany({
+            where: { id: session.id, status: "ACTIVE" },
             data: {
               status: "CANCELLED",
               endedAt: cancelledAt,
@@ -668,6 +713,11 @@ export const cancelVisit = async (req, res, next) => {
       },
       select: visitSelect,
     });
+
+    invalidateResourceCachesSafe(
+      visit.branchId,
+      activeSessions.flatMap((s) => s.components ?? []),
+    );
 
     res.status(200).json({
       success: true,

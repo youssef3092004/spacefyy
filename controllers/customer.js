@@ -8,12 +8,24 @@ import {
 } from "../utils/validation.js";
 import { messages } from "../locales/message.js";
 import { isValidTimeFormat } from "../utils/discountUtils.js";
+import bcrypt from "bcrypt";
 
 const VALID_TAGS = ["VIP", "Regular", "Blacklisted", "New", "Loyal"];
+
+const SALT_ROUNDS = 10;
+
+// Never store or return a customer password in the clear. Callers hand raw
+// rows to formatCustomer, so the strip happens there rather than in each select.
+const hashCustomerPassword = async (password) => {
+  if (!password) return null;
+  return bcrypt.hash(String(password), SALT_ROUNDS);
+};
 
 const formatCustomer = (customer) => {
   if (!customer) return customer;
   const {
+    // eslint-disable-next-line no-unused-vars
+    password: _password,
     isBlocked,
     blockedReason,
     hasDiscount,
@@ -85,6 +97,9 @@ const createCustomerWithScopedSequence = async ({
   discountEndTime = null,
 }) => {
   const maxRetries = 5;
+  // Hashed once, outside the retry loop — bcrypt is slow enough to matter
+  // inside an open transaction.
+  const passwordHash = await hashCustomerPassword(password);
 
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
     try {
@@ -104,7 +119,7 @@ const createCustomerWithScopedSequence = async ({
             name,
             phone,
             email: email || null,
-            password: password || null,
+            password: passwordHash,
             tags: tags || [],
             notes: notes || null,
             birthday: birthday ? new Date(birthday) : null,
@@ -713,6 +728,14 @@ export const updateCustomerByIdPatch = async (req, res, next) => {
       updateData.birthday = new Date(updateData.birthday);
     }
 
+    if (updateData.password !== undefined) {
+      if (!updateData.password) {
+        updateData.password = null;
+      } else {
+        updateData.password = await hashCustomerPassword(updateData.password);
+      }
+    }
+
     if (updateData.discountType !== undefined) {
       if (!["FLAT", "PERCENT"].includes(updateData.discountType)) {
         return next(new AppError("discountType must be FLAT or PERCENT", 400));
@@ -1025,30 +1048,22 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
     );
 
     // ── Base customer set from CustomerBranch (includes registered-not-visited) ─
-    const allCustomerBranches = await prisma.customerBranch.findMany({
-      where: { branchId },
-      select: { customerId: true },
-    });
-    const allCustomerIds = allCustomerBranches.map((cb) => cb.customerId);
+    // Expressed as a relation filter rather than fetching every customerId for
+    // the branch into memory and passing it back as a giant IN clause.
+    const customerWhere = {
+      customerBranches: { some: { branchId } },
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { phone: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
 
-    // ── Search filter (applies to list only, not summary) ────────────────
-    let filteredCustomerIds = allCustomerIds;
-    if (search) {
-      const matches = await prisma.customer.findMany({
-        where: {
-          id: { in: allCustomerIds },
-          OR: [
-            { name: { contains: search, mode: "insensitive" } },
-            { phone: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-          ],
-        },
-        select: { id: true },
-      });
-      filteredCustomerIds = matches.map((c) => c.id);
-    }
-
-    const total = filteredCustomerIds.length;
+    const total = await prisma.customer.count({ where: customerWhere });
 
     if (total === 0) {
       return res.status(200).json({ success: true, summary: null, data: [] });
@@ -1164,12 +1179,10 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
 
     if (isComputedSort(sort)) {
       const [allCustomers, allVisitStats] = await prisma.$transaction([
-        prisma.customer.findMany({
-          where: { id: { in: filteredCustomerIds } },
-        }),
+        prisma.customer.findMany({ where: customerWhere }),
         prisma.visit.groupBy({
           by: ["customerId"],
-          where: { branchId, customerId: { in: filteredCustomerIds } },
+          where: { branchId },
           _count: { id: true },
           _sum: { totalPrice: true },
           _max: { startedAt: true },
@@ -1203,7 +1216,7 @@ export const getCustomersHistoryByBranchId = async (req, res, next) => {
       data = merged.slice(skip, skip + limit);
     } else {
       const customers = await prisma.customer.findMany({
-        where: { id: { in: filteredCustomerIds } },
+        where: customerWhere,
         orderBy: { [sort]: order },
         skip,
         take: limit,

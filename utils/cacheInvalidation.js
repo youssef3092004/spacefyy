@@ -84,6 +84,58 @@ export const invalidateCacheByRequest = async (req) => {
   }
 };
 
+// Cache-key prefixes used by the resource routes, per SessionComponent
+// resourceType. List keys look like `devices:branchId=<id>:page=1:...` and
+// by-id keys like `device:<id>`.
+const RESOURCE_CACHE_PREFIX = {
+  SPACE: { list: "spaces", byId: "space" },
+  DEVICE: { list: "devices", byId: "device" },
+  UNIT: { list: "units", byId: "unit" },
+  EQUIPMENT: { list: "equipment", byId: "equipment" },
+};
+
+/**
+ * Invalidate the caches that reflect resource availability for a branch.
+ *
+ * Reserving and releasing happens on session/visit/component routes, whose
+ * auto-invalidation is derived from req.params — so a route like
+ * `PATCH /sessions/end/:sessionId` never cleared `devices:branchId=...` and
+ * left freed devices showing as busy until the TTL expired. Call this
+ * explicitly wherever availability changes.
+ *
+ * @param {string} branchId
+ * @param {Array<{resourceType: string, resourceId: string}>} [resources]
+ *   Specific resources touched, so their by-id keys are cleared too.
+ */
+export const invalidateResourceCachesSafe = (branchId, resources = []) => {
+  invalidateResourceCaches(branchId, resources).catch((error) => {
+    console.error("Resource cache invalidation failed:", error);
+  });
+};
+
+export const invalidateResourceCaches = async (branchId, resources = []) => {
+  if (!branchId) return;
+
+  const patterns = new Set([`tools:*branchId=${branchId}*`]);
+  for (const { list } of Object.values(RESOURCE_CACHE_PREFIX)) {
+    patterns.add(`${list}:*branchId=${branchId}*`);
+  }
+  patterns.add(`spaces:overview:branchId=${branchId}*`);
+
+  const byIdKeys = [];
+  for (const resource of resources) {
+    const prefix = RESOURCE_CACHE_PREFIX[resource?.resourceType];
+    if (prefix && resource.resourceId) {
+      byIdKeys.push(`${prefix.byId}:${resource.resourceId}`);
+    }
+  }
+
+  await Promise.all([
+    ...[...patterns].map((pattern) => invalidateCacheByPattern(pattern)),
+    byIdKeys.length ? redisClient.del(byIdKeys) : Promise.resolve(),
+  ]);
+};
+
 export const invalidateCacheByPattern = async (pattern) => {
   const stream = redisClient.scanIterator({
     MATCH: pattern,
