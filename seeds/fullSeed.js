@@ -275,6 +275,10 @@ const PERMISSIONS = [
   { name: "VIEW-EQUIPMENT", description: "View equipment" },
   { name: "UPDATE-EQUIPMENT", description: "Update equipment" },
   { name: "DELETE-EQUIPMENT", description: "Delete equipment" },
+  { name: "CREATE-GAME-MODES", description: "Create game modes" },
+  { name: "VIEW-GAME-MODES", description: "View game modes" },
+  { name: "UPDATE-GAME-MODES", description: "Update game modes" },
+  { name: "DELETE-GAME-MODES", description: "Delete game modes" },
   { name: "VIEW-USERS", description: "View users" },
   { name: "UPDATE-USERS", description: "Update users" },
   { name: "DELETE-USERS", description: "Delete users" },
@@ -348,6 +352,7 @@ const ROLE_PERMISSION_MAPPINGS = {
     "VIEW-SPACES",
     "VIEW-UNITS",
     "VIEW-EQUIPMENT",
+    "VIEW-GAME-MODES",
     "VIEW-PRICING-RULES",
     "CREATE-VISITS",
     "VIEW-VISITS",
@@ -583,6 +588,7 @@ async function main() {
       name: "Gaming Hall",
       type: "PUBLIC",
       capacity: 20,
+      bookingCapacity: 20,
       priceType: "PER_HOUR",
       price: 80,
     },
@@ -591,6 +597,7 @@ async function main() {
       name: "VIP Room",
       type: "VIP",
       capacity: 6,
+      bookingCapacity: 1,
       priceType: "PER_HOUR",
       price: 120,
     },
@@ -599,6 +606,7 @@ async function main() {
       name: "Meeting Room",
       type: "MEETING",
       capacity: 8,
+      bookingCapacity: 1,
       priceType: "PER_SESSION",
       price: 200,
     },
@@ -607,7 +615,12 @@ async function main() {
     await prisma.space.upsert({
       where: { id: s.id },
       update: {},
-      create: { ...s, branchId: BRANCH_ID, availableNumber: 1, isActive: true },
+      create: {
+        ...s,
+        branchId: BRANCH_ID,
+        availableNumber: s.bookingCapacity,
+        isActive: true,
+      },
     });
   }
   console.log("  ✓ Spaces (3)");
@@ -779,6 +792,48 @@ async function main() {
     });
   }
   console.log("  ✓ Equipment (4)");
+
+  // ── 13b. GameModes ────────────────────────────────────────────────────────
+  // Must come after Equipment: every mode points at the controller row it
+  // draws from. A mode never changes the device's rate — the extra cost of DBL
+  // is its second controller.
+  console.log("🎮 [13b/27] GameModes...");
+  const gameModes = [
+    {
+      code: "SGL",
+      label: "Single (1v1)",
+      players: 2,
+      controllersRequired: 1,
+      sortOrder: 1,
+      isDefault: true,
+    },
+    {
+      code: "DBL",
+      label: "Double (2v2)",
+      players: 4,
+      controllersRequired: 2,
+      sortOrder: 2,
+      isDefault: false,
+    },
+  ];
+  for (const m of gameModes) {
+    await prisma.gameMode.upsert({
+      where: { branchId_code: { branchId: BRANCH_ID, code: m.code } },
+      update: {},
+      create: {
+        branchId: BRANCH_ID,
+        code: m.code,
+        label: m.label,
+        players: m.players,
+        controllersRequired: m.controllersRequired,
+        controllerEquipmentId: EQUIP_IDS[0], // DualSense Controller
+        sortOrder: m.sortOrder,
+        isDefault: m.isDefault,
+        isActive: true,
+      },
+    });
+  }
+  console.log("  ✓ GameModes (2)");
 
   // ── 14. PricingRules ──────────────────────────────────────────────────────
   console.log("💰 [14/27] PricingRules...");

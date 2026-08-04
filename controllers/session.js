@@ -1,6 +1,7 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import {
+  assertGamesCountForPriceType,
   calculateComponentPrice,
   calculateDurationMinutes,
   ensureSessionStatusTransition,
@@ -10,6 +11,7 @@ import {
   parseMoney,
   roundMoney,
   serializeComponent,
+  SESSION_COMPONENT_SELECT,
 } from "../utils/sessionUtils.js";
 import {
   ensureResourceExists,
@@ -20,6 +22,8 @@ import {
   resolveResourcePricing,
 } from "../utils/resourceAvailability.js";
 import { emitSpaceOverviewUpdate } from "./webSocketSpaceOverView.js";
+import { invalidateResourceCachesSafe } from "../utils/cacheInvalidation.js";
+import { modeAppliesToDeviceType } from "../utils/gameModeUtils.js";
 
 // ─── Shapes ───────────────────────────────────────────────────────────────────
 
@@ -43,26 +47,10 @@ const sessionSelect = {
   updatedAt: true,
 };
 
-const componentSelect = {
-  id: true,
-  sessionId: true,
-  branchId: true,
-  resourceType: true,
-  resourceId: true,
-  pricingRuleId: true,
-  priceType: true,
-  unitPrice: true,
-  quantity: true,
-  gamesCount: true,
-  players: true,
-  modeLabel: true,
-  startedAt: true,
-  endedAt: true,
-  durationMinutes: true,
-  totalPrice: true,
-  createdAt: true,
-  updatedAt: true,
-};
+// Shared with sessionComponent.js and the game-mode engine. Was a duplicate
+// literal, which is how it fell behind and stopped returning gameModeId — the
+// field the frontend needs to highlight the session's current mode.
+const componentSelect = SESSION_COMPONENT_SELECT;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,6 +91,8 @@ const buildComponentData = async ({
   modeLabel,
   sessionId,
   startedAt,
+  gameMode,
+  autoManaged = false,
 }) => {
   const normalizedType = normalizeSessionResourceType(resourceType);
 
@@ -123,17 +113,23 @@ const buildComponentData = async ({
       ? String(modeLabel).trim()
       : null;
 
-  const pricingRule = await resolvePricingRule({
-    resourceType: normalizedType,
-    resourceId,
-    branchId,
-    players: playersForPricing,
-  });
   const resourcePricing = await resolveResourcePricing({
     resourceType: normalizedType,
     resourceId,
     branchId,
   });
+
+  // With a GameMode the resource always bills at its own base rate — the mode's
+  // extra cost is its controllers, not a different device rate. PricingRule is
+  // only consulted on the legacy players/modeLabel path.
+  const pricingRule = gameMode
+    ? null
+    : await resolvePricingRule({
+        resourceType: normalizedType,
+        resourceId,
+        branchId,
+        players: playersForPricing,
+      });
 
   const priceType = pricingRule
     ? mapPricingRuleToPriceType(pricingRule)
@@ -142,6 +138,8 @@ const buildComponentData = async ({
   const unitPrice = pricingRule
     ? parseMoney(pricingRule.price, "pricingRule.price")
     : resourcePricing.price;
+
+  assertGamesCountForPriceType(priceType, gamesCount);
 
   return {
     normalizedType,
@@ -158,12 +156,20 @@ const buildComponentData = async ({
       unitPrice,
       quantity: quantity != null ? Math.max(1, Number(quantity)) : 1,
       gamesCount: gamesCount != null ? Number(gamesCount) : 0,
-      players: playersForPricing ?? null,
-      // Explicit label from the request wins; otherwise fall back to a matched
-      // pricing rule's name (null when neither exists).
-      modeLabel: isModeResource
-        ? (explicitLabel ?? pricingRule?.name ?? null)
+      players: isModeResource
+        ? (playersForPricing ?? gameMode?.players ?? null)
         : null,
+      // Explicit label from the request wins; then the mode's own label; then a
+      // matched pricing rule's name (null when none of them exist).
+      modeLabel: isModeResource
+        ? (explicitLabel ?? gameMode?.label ?? pricingRule?.name ?? null)
+        : null,
+      // Only the lines the mode actually governs carry its id: the playable
+      // device/unit, and the controllers the mode itself added. A SPACE is
+      // billed the same in every mode, so tagging it would credit the room's
+      // revenue to whichever mode happened to be running.
+      gameModeId: isModeResource || autoManaged ? (gameMode?.id ?? null) : null,
+      autoManaged,
       startedAt,
       totalPrice: 0,
     },
@@ -246,6 +252,8 @@ export const createSession = async (req, res, next) => {
       components,
       players,
       modeLabel,
+      gameModeId,
+      modeCode,
     } = req.body ?? {};
 
     if (!branchId || !visitId) {
@@ -315,6 +323,13 @@ export const createSession = async (req, res, next) => {
     }
 
     const sessionStartedAt = parseDate(startedAt, "startedAt") || new Date();
+
+    // A future start makes the session un-closeable: change-mode requires
+    // switchedAt > startedAt and endSession requires endedAt >= startedAt, so
+    // neither can ever be satisfied. A minute of slack absorbs client clock skew.
+    if (sessionStartedAt.getTime() > Date.now() + 60_000) {
+      return next(new AppError("startedAt cannot be in the future", 400));
+    }
     const actorUserId = await resolveActorUserId(req);
 
     // Resolve the final component list — smart mode (device/unit) or manual array.
@@ -333,6 +348,95 @@ export const createSession = async (req, res, next) => {
       return next(err);
     }
 
+    // A session may start in a game mode (e.g. SGL). The mode contributes the
+    // player count and label to the device/unit line, and its controllers as an
+    // extra auto-managed EQUIPMENT line.
+    let gameMode = null;
+    if (gameModeId || modeCode) {
+      gameMode = await prisma.gameMode.findFirst({
+        where: {
+          branchId,
+          isActive: true,
+          ...(gameModeId
+            ? { id: gameModeId }
+            : { code: String(modeCode).trim().toUpperCase() }),
+        },
+        select: {
+          id: true,
+          code: true,
+          label: true,
+          players: true,
+          controllersRequired: true,
+          controllerEquipmentId: true,
+          deviceTypes: true,
+        },
+      });
+      if (!gameMode) {
+        return next(new AppError("Game mode not found for this branch", 404));
+      }
+
+      // Enforce the mode's device-type restriction here too, so the API can't
+      // accept a combination the switcher deliberately hides.
+      if (gameMode.deviceTypes?.length > 0) {
+        const modeTarget = rawComponents.find(
+          (c) => c.resourceType === "DEVICE" || c.resourceType === "UNIT",
+        );
+        if (modeTarget) {
+          const row =
+            modeTarget.resourceType === "DEVICE"
+              ? await prisma.device.findUnique({
+                  where: { id: modeTarget.resourceId },
+                  select: { type: true },
+                })
+              : await prisma.unit.findUnique({
+                  where: { id: modeTarget.resourceId },
+                  select: { type: true },
+                });
+
+          if (!modeAppliesToDeviceType(gameMode, row?.type)) {
+            return next(
+              new AppError(
+                `Game mode ${gameMode.code} does not apply to this ${modeTarget.resourceType.toLowerCase()}`,
+                400,
+                { typeError: "DEVICE_TYPE_MISMATCH" },
+              ),
+            );
+          }
+        }
+      }
+
+      if (gameMode.controllersRequired > 0) {
+        const controller = await prisma.equipment.findFirst({
+          where: {
+            id: gameMode.controllerEquipmentId,
+            branchId,
+            type: "CONTROLLER",
+            isActive: true,
+            isDeleted: false,
+          },
+          select: { id: true },
+        });
+        if (!controller) {
+          return next(
+            new AppError(
+              "This mode's controller equipment is missing or inactive",
+              400,
+              { typeError: "MODE_MISCONFIGURED" },
+            ),
+          );
+        }
+        rawComponents = [
+          ...rawComponents,
+          {
+            resourceType: "EQUIPMENT",
+            resourceId: controller.id,
+            quantity: gameMode.controllersRequired,
+            autoManaged: true,
+          },
+        ];
+      }
+    }
+
     // Validate and resolve pricing for every component before opening a transaction.
     const builtComponents = await Promise.all(
       rawComponents.map((c) =>
@@ -346,6 +450,8 @@ export const createSession = async (req, res, next) => {
           modeLabel: c.modeLabel,
           sessionId: null,
           startedAt: sessionStartedAt,
+          gameMode,
+          autoManaged: c.autoManaged === true,
         }),
       ),
     );
@@ -438,6 +544,7 @@ export const createSession = async (req, res, next) => {
       action: "SESSION_CREATED",
       sessionId: session?.id ?? null,
     });
+    invalidateResourceCachesSafe(branchId, session?.components ?? []);
 
     res.status(201).json({
       success: true,
@@ -459,16 +566,50 @@ export const endSession = async (req, res, next) => {
     ensureSessionStatusTransition(existingSession.status, "ENDED");
 
     const actorUserId = await resolveActorUserId(req);
-    const endedAt = new Date();
+
+    // Optional explicit end time, so staff can correct a late entry ("they
+    // actually left at 17:00") instead of being billed to whenever the button
+    // was pressed. Defaults to now.
+    const endedAt = parseDate(req.body?.endedAt, "endedAt") || new Date();
+
+    if (endedAt > new Date()) {
+      return next(new AppError("endedAt cannot be in the future", 400));
+    }
+    if (endedAt < new Date(existingSession.startedAt)) {
+      return next(
+        new AppError("endedAt cannot be before the session started", 400),
+      );
+    }
+
+    // Every still-open component is priced up to endedAt, so it cannot precede
+    // any of their start times either — calculateComponentPrice would throw
+    // mid-transaction and abort the close.
+    const earliestInvalid = existingSession.components.find(
+      (c) => !c.endedAt && endedAt < new Date(c.startedAt),
+    );
+    if (earliestInvalid) {
+      return next(
+        new AppError(
+          "endedAt cannot be before one of the session's components started",
+          400,
+        ),
+      );
+    }
 
     const session = await prisma.$transaction(async (tx) => {
       let sessionTotal = 0;
 
       for (const comp of existingSession.components) {
-        const compEndedAt = comp.endedAt || endedAt;
+        // Already ended: its resource was released when it ended. Releasing
+        // again inflates SPACE.availableNumber and lets the room be overbooked.
+        if (comp.endedAt) {
+          sessionTotal = roundMoney(sessionTotal + Number(comp.totalPrice ?? 0));
+          continue;
+        }
+
         const durationMinutes = calculateDurationMinutes(
           comp.startedAt,
-          compEndedAt,
+          endedAt,
         );
         const totalPrice = calculateComponentPrice({
           priceType: comp.priceType,
@@ -476,13 +617,13 @@ export const endSession = async (req, res, next) => {
           quantity: comp.quantity,
           gamesCount: comp.gamesCount,
           startedAt: comp.startedAt,
-          endedAt: compEndedAt,
+          endedAt,
         });
 
         await tx.sessionComponent.update({
           where: { id: comp.id },
           data: {
-            endedAt: compEndedAt,
+            endedAt,
             durationMinutes,
             totalPrice,
           },
@@ -502,8 +643,10 @@ export const endSession = async (req, res, next) => {
         endedAt,
       );
 
-      return tx.session.update({
-        where: { id: sessionId },
+      // Guarded write: the ACTIVE check above ran outside this transaction, so
+      // a concurrent end would otherwise run the release loop twice.
+      const updated = await tx.session.updateMany({
+        where: { id: sessionId, status: "ACTIVE" },
         data: {
           status: "ENDED",
           endedAt,
@@ -511,6 +654,14 @@ export const endSession = async (req, res, next) => {
           totalPrice: sessionTotal,
           endedById: actorUserId,
         },
+      });
+
+      if (updated.count === 0) {
+        throw new AppError("Session is no longer ACTIVE", 409);
+      }
+
+      return tx.session.findUnique({
+        where: { id: sessionId },
         select: { ...sessionSelect, components: { select: componentSelect } },
       });
     });
@@ -519,6 +670,10 @@ export const endSession = async (req, res, next) => {
       action: "SESSION_ENDED",
       sessionId,
     });
+    invalidateResourceCachesSafe(
+      existingSession.branchId,
+      existingSession.components ?? [],
+    );
 
     res.status(200).json({
       success: true,
@@ -544,6 +699,11 @@ export const cancelSession = async (req, res, next) => {
 
     const session = await prisma.$transaction(async (tx) => {
       for (const comp of existingSession.components) {
+        // Only components still open need zeroing and releasing. An already
+        // ended one was released when it ended — releasing it again overbooks
+        // the space, and rewriting its price erases an already-billed charge.
+        if (comp.endedAt) continue;
+
         await tx.sessionComponent.update({
           where: { id: comp.id },
           data: { endedAt: canceledAt, durationMinutes: 0, totalPrice: 0 },
@@ -556,8 +716,8 @@ export const cancelSession = async (req, res, next) => {
         });
       }
 
-      return tx.session.update({
-        where: { id: sessionId },
+      const updated = await tx.session.updateMany({
+        where: { id: sessionId, status: "ACTIVE" },
         data: {
           status: "CANCELLED",
           endedAt: canceledAt,
@@ -565,6 +725,14 @@ export const cancelSession = async (req, res, next) => {
           totalPrice: 0,
           canceledById: actorUserId,
         },
+      });
+
+      if (updated.count === 0) {
+        throw new AppError("Session is no longer ACTIVE", 409);
+      }
+
+      return tx.session.findUnique({
+        where: { id: sessionId },
         select: { ...sessionSelect, components: { select: componentSelect } },
       });
     });
@@ -573,6 +741,10 @@ export const cancelSession = async (req, res, next) => {
       action: "SESSION_CANCELLED",
       sessionId,
     });
+    invalidateResourceCachesSafe(
+      existingSession.branchId,
+      existingSession.components ?? [],
+    );
 
     res.status(200).json({
       success: true,
@@ -597,8 +769,40 @@ export const updateSessionById = async (req, res, next) => {
 
     if (bookingId !== undefined) updateData.bookingId = bookingId || null;
     if (currency !== undefined) updateData.currency = currency || "EGP";
-    if (startedAt !== undefined)
-      updateData.startedAt = parseDate(startedAt, "startedAt");
+    if (startedAt !== undefined) {
+      // Only an ACTIVE session may be re-timed: on an ENDED one the duration
+      // and price are already frozen, so moving startedAt just desyncs them.
+      if (existingSession.status !== "ACTIVE") {
+        return next(
+          new AppError("Only an ACTIVE session's startedAt can be changed", 409),
+        );
+      }
+
+      const parsedStartedAt = parseDate(startedAt, "startedAt");
+      // A future startedAt makes every close throw "endedAt cannot be before
+      // startedAt" from inside the transaction — the visit could never close.
+      if (parsedStartedAt > new Date()) {
+        return next(new AppError("startedAt cannot be in the future", 400));
+      }
+
+      const earliestComponent = (existingSession.components ?? []).reduce(
+        (earliest, comp) => {
+          const start = new Date(comp.startedAt);
+          return !earliest || start < earliest ? start : earliest;
+        },
+        null,
+      );
+      if (earliestComponent && parsedStartedAt > earliestComponent) {
+        return next(
+          new AppError(
+            "startedAt cannot be after one of the session's components started",
+            400,
+          ),
+        );
+      }
+
+      updateData.startedAt = parsedStartedAt;
+    }
 
     if (!Object.keys(updateData).length) {
       return next(new AppError("No valid fields to update", 400));
@@ -629,9 +833,12 @@ export const deleteSessionById = async (req, res, next) => {
     ensureBranchMatch(existingSession.branchId, branchId);
     const actorUserId = await resolveActorUserId(req);
 
-    if (existingSession.status === "ACTIVE") {
-      const cancelledAt = new Date();
-      await prisma.$transaction(async (tx) => {
+    // Release and soft-delete must commit together. Split across two statements,
+    // a crash in between leaves an ACTIVE, non-deleted session whose components
+    // are all closed and whose resources are already handed to someone else.
+    await prisma.$transaction(async (tx) => {
+      if (existingSession.status === "ACTIVE") {
+        const cancelledAt = new Date();
         for (const comp of existingSession.components) {
           if (!comp.endedAt) {
             await tx.sessionComponent.update({
@@ -645,13 +852,18 @@ export const deleteSessionById = async (req, res, next) => {
             });
           }
         }
-      });
-    }
+      }
 
-    await prisma.session.update({
-      where: { id: sessionId },
-      data: { deletedAt: new Date(), deletedById: actorUserId },
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { deletedAt: new Date(), deletedById: actorUserId },
+      });
     });
+
+    invalidateResourceCachesSafe(
+      existingSession.branchId,
+      existingSession.components ?? [],
+    );
 
     res
       .status(200)

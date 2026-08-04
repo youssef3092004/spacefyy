@@ -13,7 +13,10 @@ import {
   getSessionById,
   updateSessionById,
 } from "../controllers/session.js";
-import { changeSessionPlayers } from "../controllers/sessionComponent.js";
+import {
+  changeSessionMode,
+  changeSessionPlayers,
+} from "../controllers/sessionComponent.js";
 import { cacheMiddleware } from "../middleware/cache.js";
 
 const router = Router();
@@ -83,6 +86,18 @@ router.patch(
   cancelSession,
 );
 
+// Preferred name — takes gameModeId/modeCode and manages controllers.
+router.patch(
+  "/change-mode/:sessionId",
+  verifyToken,
+  checkPermission("UPDATE-SESSIONS"),
+  checkOwnership({ model: "session", paramId: "sessionId", scope: "branch" }),
+  requireOpenShift(),
+  changeSessionMode,
+);
+
+// Back-compat alias for clients that predate GameMode; same handler, and a
+// body carrying only `players` still just relabels the segment.
 router.patch(
   "/change-players/:sessionId",
   verifyToken,

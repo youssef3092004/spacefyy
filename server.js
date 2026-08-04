@@ -60,6 +60,8 @@ app.use((req, res, next) => {
 
 app.use(autoInvalidateCache());
 
+import { apiLimiter, authLimiter } from "./middleware/rateLimit.js";
+
 // Routes
 import authRouter from "./routes/auth.js";
 import roleRouter from "./routes/role.js";
@@ -78,6 +80,7 @@ import deviceRouter from "./routes/device.js";
 import unitRouter from "./routes/unit.js";
 import equipmentRouter from "./routes/equipment.js";
 import pricingRulesRouter from "./routes/pricingRules.js";
+import gameModeRouter from "./routes/gameMode.js";
 import resourcePricingRouter from "./routes/resourcePricing.js";
 import planRouter from "./routes/plan.js";
 import subscriptionRouter from "./routes/subscription.js";
@@ -100,7 +103,8 @@ import webSocketSpaceOverViewRouter from "./routes/webSocketSpaceOverView.js";
 
 import seedRouter from "./seeds/permissions.js";
 
-app.use("/api/v1/auth", authRouter);
+app.use("/api/v1", apiLimiter);
+app.use("/api/v1/auth", authLimiter, authRouter);
 app.use("/api/v1/roles", roleRouter);
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/permissions", permissionRouter);
@@ -116,6 +120,7 @@ app.use("/api/v1/spaces", spaceRouter);
 app.use("/api/v1/devices", deviceRouter);
 app.use("/api/v1/units", unitRouter);
 app.use("/api/v1/equipments", equipmentRouter);
+app.use("/api/v1/game-modes", gameModeRouter);
 app.use("/api/v1/pricing-rules", pricingRulesRouter);
 app.use("/api/v1/resource-pricing", resourcePricingRouter);
 app.use("/api/v1/plans", planRouter);
@@ -146,10 +151,17 @@ app.get("/", (req, res) => {
 // Error Handling Middleware
 app.use(errorHandler);
 
+// CORS_ORIGINS is a comma-separated allow-list; it falls back to "*" only when
+// unset, so a deploy that forgets it is loud in review rather than silently open.
+const socketOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim())
+  : "*";
+
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: socketOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
