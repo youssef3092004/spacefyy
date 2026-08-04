@@ -33,7 +33,7 @@ const getRoleIdOrThrow = async (roleName) => {
 
 export const registerOwner = async (req, res, next) => {
   try {
-    if (req.user.roleName !== "DEVELOPER") {
+    if (req.user?.roleName !== "DEVELOPER") {
       return next(
         new AppError("Forbidden: Only DEVELOPER can register owners", 403),
       );
@@ -331,7 +331,17 @@ export const registerStaff = async (req, res, next) => {
 
 export const registerDeveloper = async (req, res, next) => {
   try {
-    if (req.user.roleName !== "DEVELOPER") {
+    // Bootstrap exception: the very first developer on an empty install may be
+    // created without a token. Once one exists, only a DEVELOPER may add more.
+    const developerRole = await prisma.role.findUnique({
+      where: { name: "DEVELOPER" },
+      select: { id: true },
+    });
+    const existingDevelopers = developerRole
+      ? await prisma.user.count({ where: { roleId: developerRole.id } })
+      : 0;
+
+    if (existingDevelopers > 0 && req.user?.roleName !== "DEVELOPER") {
       return next(
         new AppError("Forbidden: Only DEVELOPER can register developers", 403),
       );
@@ -430,27 +440,30 @@ export const login = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { email },
     });
-    if (!user) {
-      return next(new AppError("Invalid email", 401));
-    }
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return next(new AppError("Invalid password", 401));
+
+    // One message for both failure modes: distinguishing "invalid email" from
+    // "invalid password" turns this endpoint into an account-enumeration oracle.
+    const isPasswordValid = user
+      ? await bcrypt.compare(password, user.password)
+      : false;
+
+    if (!user || !isPasswordValid || user.isDeleted) {
+      return next(new AppError("Invalid email or password", 401));
     }
 
     // eslint-disable-next-line no-unused-vars
     const { password: _, ...userWithoutPassword } = user;
 
-    const role = await prisma.role.findUnique({
-      where: { id: user.roleId },
-    });
+    const role = user.roleId
+      ? await prisma.role.findUnique({ where: { id: user.roleId } })
+      : null;
 
     const token = jwt.sign(
       {
         id: user.id,
         userId: user.id,
         roleId: user.roleId,
-        roleName: role.name,
+        roleName: role?.name ?? null,
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN },

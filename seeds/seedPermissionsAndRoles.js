@@ -96,6 +96,10 @@ const PERMISSIONS = [
   { name: "VIEW-EQUIPMENT", description: "View equipment" },
   { name: "UPDATE-EQUIPMENT", description: "Update equipment" },
   { name: "DELETE-EQUIPMENT", description: "Delete equipment" },
+  { name: "CREATE-GAME-MODES", description: "Create game modes" },
+  { name: "VIEW-GAME-MODES", description: "View game modes" },
+  { name: "UPDATE-GAME-MODES", description: "Update game modes" },
+  { name: "DELETE-GAME-MODES", description: "Delete game modes" },
 
   { name: "VIEW-USERS", description: "View users" },
   { name: "UPDATE-USERS", description: "Update users" },
@@ -178,6 +182,7 @@ const ROLE_PERMISSION_MAPPINGS = {
     "VIEW-SPACES",
     "VIEW-UNITS",
     "VIEW-EQUIPMENT",
+    "VIEW-GAME-MODES",
     "VIEW-PRICING-RULES",
     "CREATE-VISITS",
     "VIEW-VISITS",

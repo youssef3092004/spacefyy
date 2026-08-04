@@ -38,6 +38,7 @@ Spacefyy is a multi-tenant backend API for managing branch-based businesses — 
 Spacefyy is built for businesses that operate across multiple branches and need to track customer time, resource usage, products, and billing all in one place.
 
 **Target use cases:**
+
 - Gaming cafes (PlayStation, Xbox, VR, simulators)
 - Co-working spaces and hot-desking setups
 - Billiard halls, table tennis venues, and similar activity spaces
@@ -49,15 +50,15 @@ A customer walks in, a visit is opened, one or more sessions are started (each t
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js (ESM) |
-| Framework | Express |
-| Database | PostgreSQL via Prisma ORM |
-| Cache | Redis |
-| Auth | JWT |
-| File storage | Cloudinary |
-| Security | Helmet, CORS, XSS sanitization |
+| Layer        | Technology                     |
+| ------------ | ------------------------------ |
+| Runtime      | Node.js (ESM)                  |
+| Framework    | Express                        |
+| Database     | PostgreSQL via Prisma ORM      |
+| Cache        | Redis                          |
+| Auth         | JWT                            |
+| File storage | Cloudinary                     |
+| Security     | Helmet, CORS, XSS sanitization |
 
 ---
 
@@ -109,21 +110,22 @@ Each business is on a subscription plan that controls limits (max branches, spac
 
 Resources are the physical things a customer can use during a session. Each resource belongs to a branch and has its own base price and pricing type.
 
-| Resource | Description |
-|---|---|
-| **Space** | A room or area (private room, public zone, meeting room, VIP area, etc.) |
-| **Device** | A hardware device (PS4, PS5, Xbox, PC, VR headset, simulator, etc.) |
-| **Unit** | A table or station (billiard table, ping-pong table, gaming station, etc.) |
-| **Equipment** | An accessory (controller, headset, keyboard, steering wheel, etc.) |
+| Resource      | Description                                                                |
+| ------------- | -------------------------------------------------------------------------- |
+| **Space**     | A room or area (private room, public zone, meeting room, VIP area, etc.)   |
+| **Device**    | A hardware device (PS4, PS5, Xbox, PC, VR headset, simulator, etc.)        |
+| **Unit**      | A table or station (billiard table, ping-pong table, gaming station, etc.) |
+| **Equipment** | An accessory (controller, headset, keyboard, steering wheel, etc.)         |
 
 Every resource has:
+
 - A `priceType` — `PER_HOUR`, `PER_SESSION`, or `PER_GAME`
 - A `price` — the base rate
 - An `isBusy` flag — automatically updated when sessions start and end
 
 Pricing rules can override any resource's default price with time-range constraints, player count conditions, and priority levels.
 
-**Space capacity:** only **PUBLIC** spaces hold multiple resources and take a `capacity` from the client. Every other space type (PRIVATE, MEETING, VIP, DESK, OTHER) is **single-use** — its `capacity` is always `1` and any client-supplied value is ignored on create/update.
+**Space capacity:** only **PUBLIC** spaces hold multiple resources and take a `bookingCapacity` from the client. Every other space type (PRIVATE, MEETING, VIP, DESK, OTHER) is **single-use** — its `bookingCapacity` is always `1` and any client-supplied value is ignored on create/update. `bookingCapacity` is the availability logic field (it seeds and caps `availableNumber`). The separate `capacity` field is a **display-only** number the frontend supplies for any space type and is never used in availability logic.
 
 **Live overview:** `GET /spaces/overview/:branchId` returns the whole branch floor — every space (with the devices/units inside PUBLIC spaces), each resource's busy/free state, the `customer` and `visitId` occupying it, and dashboard metrics: `activeVisits`, `spacesOccupied` / `spacesTotal`, `todayOrders`, and `longestSessionSeconds` (plus a pre-formatted `longestSession`, e.g. `"2h 25m"`). Updates are pushed live over Socket.IO — clients don't poll.
 
@@ -206,6 +208,7 @@ Every order response includes an `invoice` summary so the frontend can show its 
 An invoice is generated when a visit is closed or when a takeaway order is completed and invoiced separately.
 
 **Visit invoice** contains:
+
 - `totalAmount` — raw total before discounts (sessions + orders)
 - `customerDiscountType/Amount` — auto-resolved from the customer's profile
 - `discountType/Amount` — manual discount applied by staff at checkout
@@ -251,7 +254,7 @@ The number of shifts a branch may run per day is **capped by its subscription pl
 
 **No sale, booking, session, order, or payment can happen without an open shift** — every money-touching write (starting/closing a visit, sessions, orders, order items, invoice creation/payment) is blocked with `400` unless the branch currently has one `OPEN`. `OWNER`/`DEVELOPER` bypass this gate. Every invoice paid by a `STAFF`/`ADMIN` user is stamped with the shift that was open at the time (`Invoice.shiftId`), so revenue is provably attributable, not just time-window-guessed.
 
-Opening a shift requires a counted **opening cash** float; closing requires handover notes and a manually counted **actual cash** amount. The system computes what the drawer *should* contain (`expectedCash = openingCash + cash revenue − expenses`) and flags any **variance** — a shortfall (critical) or overage (warning) — the actual point of a daily cash-closing report. Petty-cash **expenses** paid out of the till during a shift require an amount and a reason, and only exist while the shift is `OPEN`.
+Opening a shift requires a counted **opening cash** float; closing requires handover notes and a manually counted **actual cash** amount. The system computes what the drawer _should_ contain (`expectedCash = openingCash + cash revenue − expenses`) and flags any **variance** — a shortfall (critical) or overage (warning) — the actual point of a daily cash-closing report. Petty-cash **expenses** paid out of the till during a shift require an amount and a reason, and only exist while the shift is `OPEN`.
 
 Each shift also tracks **staff attendance** (present / late / absent / left-early, with check-in/out times), editable only while the shift is `OPEN`. Closing a shift returns the full picture: revenue with payment-method breakdown, expenses, and the cash reconciliation. `GET /shifts/report/daily/:branchId` rolls all of a day's shifts into attendance, revenue, expense, and variance totals.
 
@@ -299,7 +302,7 @@ A business's billing history is tracked as `Subscription` rows — one per plan 
 
 The pricing system is the most complex part of Spacefyy. It covers:
 
-- How session components are priced (PER\_HOUR, PER\_SESSION, PER\_GAME)
+- How session components are priced (PER_HOUR, PER_SESSION, PER_GAME)
 - How pricing rules override resource base prices
 - How mid-session resource additions work (e.g., adding controllers while a session is running)
 - How discounts are applied — customer discount first, then manual discount on top
@@ -318,38 +321,44 @@ All endpoints are versioned under:
 /api/v1
 ```
 
-| Prefix | Module |
-|---|---|
-| `/api/v1/auth` | Authentication |
-| `/api/v1/users` | Users |
-| `/api/v1/roles` | Roles |
-| `/api/v1/permissions` | Permissions |
-| `/api/v1/businesses` | Businesses |
-| `/api/v1/branches` | Branches |
-| `/api/v1/spaces` | Spaces |
-| `/api/v1/devices` | Devices |
-| `/api/v1/units` | Units |
-| `/api/v1/equipment` | Equipment |
-| `/api/v1/pricing-rules` | Pricing rules |
-| `/api/v1/resource-pricing` | Bulk resource pricing |
-| `/api/v1/customers` | Customers |
-| `/api/v1/visits` | Visits |
-| `/api/v1/sessions` | Sessions |
-| `/api/v1/session-components` | Session components |
-| `/api/v1/products` | Products |
-| `/api/v1/categories` | Product categories |
-| `/api/v1/orders` | Orders |
-| `/api/v1/invoices` | Invoices |
-| `/api/v1/staff` | Staff profiles |
-| `/api/v1/payroll` | Payroll |
-| `/api/v1/analytics` | Analytics |
-| `/api/v1/reports` | Branch & business financial reports |
-| `/api/v1/shifts` | Shift open/close, till reconciliation, daily shift report |
-| `/api/v1/shift-attendance` | Per-shift staff attendance |
-| `/api/v1/shift-expenses` | Per-shift petty-cash expenses |
-| `/api/v1/plans` | Plans |
-| `/api/v1/subscriptions` | Subscriptions |
-| `/api/v1/storage-usage` | Storage usage |
+| Prefix                             | Module                                                    |
+| ---------------------------------- | --------------------------------------------------------- |
+| `/api/v1/auth`                     | Authentication                                            |
+| `/api/v1/roles`                    | Roles                                                     |
+| `/api/v1/users`                    | Users                                                     |
+| `/api/v1/permissions`              | Permissions                                               |
+| `/api/v1/role-permissions`         | Role permissions                                          |
+| `/api/v1/user-permissions`         | User permissions                                          |
+| `/api/v1/businesses`               | Businesses                                                |
+| `/api/v1/branches`                 | Branches                                                  |
+| `/api/v1/branch-user-permissions`  | Branch-level permission overrides                         |
+| `/api/v1/spaces`                   | Spaces                                                    |
+| `/api/v1/devices`                  | Devices                                                   |
+| `/api/v1/units`                    | Units                                                     |
+| `/api/v1/equipments`               | Equipments                                                |
+| `/api/v1/pricing-rules`            | Pricing rules                                             |
+| `/api/v1/resource-pricing`         | Bulk resource pricing                                     |
+| `/api/v1/plans`                    | Plans                                                     |
+| `/api/v1/subscriptions`            | Subscriptions                                             |
+| `/api/v1/storage-usage`            | Storage usage                                             |
+| `/api/v1/customers`                | Customers                                                 |
+| `/api/v1/visits`                   | Visits                                                    |
+| `/api/v1/sessions`                 | Sessions                                                  |
+| `/api/v1/session-components`       | Session components                                        |
+| `/api/v1/products`                 | Products                                                  |
+| `/api/v1/categories`               | Product categories                                        |
+| `/api/v1/orders`                   | Orders                                                    |
+| `/api/v1/order-items`              | Order items                                               |
+| `/api/v1/invoices`                 | Invoices                                                  |
+| `/api/v1/staff-profiles`           | Staff profiles                                            |
+| `/api/v1/business-settings`        | Business settings                                         |
+| `/api/v1/payrolls`                 | Payroll                                                   |
+| `/api/v1/analytics`                | Analytics                                                 |
+| `/api/v1/reports`                  | Branch & business financial reports                       |
+| `/api/v1/shifts`                   | Shift open/close, till reconciliation, daily shift report |
+| `/api/v1/shift-attendance`         | Per-shift staff attendance                                |
+| `/api/v1/shift-expenses`           | Per-shift petty-cash expenses                             |
+| `/api/v1/websocket-space-overview` | Real-time space overview sockets                          |
 
 ---
 
@@ -369,13 +378,13 @@ All endpoints are versioned under:
 
 Five cron jobs run on a schedule (all configurable via env cron expressions):
 
-| Job | Default schedule | What it does |
-|---|---|---|
-| `branchStatsCron` | Monthly | Persists monthly branch statistics (revenue, customer counts) so analytics queries stay fast |
-| `dailyReportCron` | Daily (00:10 UTC) | Persists yesterday's per-branch financial snapshot (`BranchDailyReport`: revenue splits, payment breakdown, discounts, customer counts) so reports over long ranges stay fast |
-| `storageUsageCron` | Weekly | Recalculates and persists current resource counts per business for plan limit enforcement |
-| `visitAutoCancelCron` | Every 5 min | Cancels stale `ACTIVE` visits that have no sessions and no orders after a timeout (`AUTO_CANCEL_AFTER_MINUTES`, default 30) |
-| `subscriptionCron` | Hourly | Moves lapsed subscriptions `ACTIVE → PAST_DUE → EXPIRED` (or `→ CANCELLED` if deferred cancellation was requested), after a grace period (`SUBSCRIPTION_GRACE_DAYS`, default 3) |
+| Job                   | Default schedule  | What it does                                                                                                                                                                    |
+| --------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branchStatsCron`     | Monthly           | Persists monthly branch statistics (revenue, customer counts) so analytics queries stay fast                                                                                    |
+| `dailyReportCron`     | Daily (00:10 UTC) | Persists yesterday's per-branch financial snapshot (`BranchDailyReport`: revenue splits, payment breakdown, discounts, customer counts) so reports over long ranges stay fast   |
+| `storageUsageCron`    | Weekly            | Recalculates and persists current resource counts per business for plan limit enforcement                                                                                       |
+| `visitAutoCancelCron` | Every 5 min       | Cancels stale `ACTIVE` visits that have no sessions and no orders after a timeout (`AUTO_CANCEL_AFTER_MINUTES`, default 30)                                                     |
+| `subscriptionCron`    | Hourly            | Moves lapsed subscriptions `ACTIVE → PAST_DUE → EXPIRED` (or `→ CANCELLED` if deferred cancellation was requested), after a grace period (`SUBSCRIPTION_GRACE_DAYS`, default 3) |
 
 > Cron jobs require a long-running server process and do not run on Vercel serverless functions.
 
@@ -385,20 +394,20 @@ Five cron jobs run on a schedule (all configurable via env cron expressions):
 
 One-off scripts under `scripts/`, run with `node --env-file=.env scripts/<name>.js`:
 
-| Script | What it does |
-|---|---|
-| `reconcileResourceState.js` | Recomputes every space/device/unit's `isBusy` (and normalizes non-PUBLIC space `capacity` to `1`) from the live sessions, clearing any drift between the data and the live overview. **Dry-run by default**; pass `--apply` to write, `--branch=<id>` to scope. |
+| Script                      | What it does                                                                                                                                                                                                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reconcileResourceState.js` | Recomputes every space/device/unit's `isBusy` (and normalizes non-PUBLIC space `bookingCapacity` to `1`) from the live sessions, clearing any drift between the data and the live overview. **Dry-run by default**; pass `--apply` to write, `--branch=<id>` to scope. |
 
 ---
 
 ## Environment Variables
 
-| Variable | Description |
-|---|---|
-| `PORT` | Port the server listens on |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis connection string |
-| `JWT_SECRET` | Secret used to sign and verify JWT tokens |
-| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name for file uploads |
-| `CLOUDINARY_API_KEY` | Cloudinary API key |
-| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
+| Variable                | Description                               |
+| ----------------------- | ----------------------------------------- |
+| `PORT`                  | Port the server listens on                |
+| `DATABASE_URL`          | PostgreSQL connection string              |
+| `REDIS_URL`             | Redis connection string                   |
+| `JWT_SECRET`            | Secret used to sign and verify JWT tokens |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name for file uploads    |
+| `CLOUDINARY_API_KEY`    | Cloudinary API key                        |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret                     |

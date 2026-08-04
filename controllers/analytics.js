@@ -2,6 +2,19 @@ import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { getBranchIds, toNum } from "../utils/analyticsHelpers.js";
 
+// Plain date strings parse as UTC midnight, but this codebase's day boundaries
+// are local. Matches report.js's resolveDateRange so the dashboard and the
+// reports never disagree about which day a payment belongs to.
+const parseLocalDate = (value, endOfDay) => {
+  if (!value.includes("T")) {
+    const [y, m, d] = value.split("-").map(Number);
+    return endOfDay
+      ? new Date(y, m - 1, d, 23, 59, 59, 999)
+      : new Date(y, m - 1, d);
+  }
+  return new Date(value);
+};
+
 // ─── Controllers ──────────────────────────────────────────────────────────────
 
 export const getBusinessDashboard = async (req, res, next) => {
@@ -54,7 +67,8 @@ export const getBusinessDashboard = async (req, res, next) => {
           paidAt: { gte: todayStart, lt: todayEnd },
           OR: [{ branchId: { in: branchIds } }, { visit: { branchId: { in: branchIds } } }],
         },
-        _sum: { totalAmount: true },
+        // finalAmount, not totalAmount — see getRevenueReport.
+        _sum: { finalAmount: true },
       }),
       prisma.customer.count({ where: { businessId } }),
       prisma.payroll.count({
@@ -73,7 +87,7 @@ export const getBusinessDashboard = async (req, res, next) => {
       data: {
         activeVisits,
         openTakeawayOrders,
-        todayRevenue: toNum(todayRevenue._sum.totalAmount),
+        todayRevenue: toNum(todayRevenue._sum.finalAmount),
         totalCustomers,
         pendingPayrolls,
         unpaidInvoices,
@@ -108,8 +122,10 @@ export const getRevenueReport = async (req, res, next) => {
     const branchIds = await getBranchIds(businessId, branchId);
 
     const dateFilter = {};
-    if (startDate) dateFilter.gte = new Date(startDate);
-    if (endDate) dateFilter.lte = new Date(endDate);
+    if (startDate) dateFilter.gte = parseLocalDate(startDate, false);
+    // Through the END of the end day — `new Date("2026-01-31")` is that day's
+    // midnight, which silently excluded all of January 31st.
+    if (endDate) dateFilter.lte = parseLocalDate(endDate, true);
     const hasDates = Object.keys(dateFilter).length > 0;
 
     const invoices = await prisma.invoice.findMany({
@@ -118,7 +134,10 @@ export const getRevenueReport = async (req, res, next) => {
         ...(hasDates ? { paidAt: dateFilter } : {}),
         OR: [{ branchId: { in: branchIds } }, { visit: { branchId: { in: branchIds } } }],
       },
-      select: { totalAmount: true, paidAt: true },
+      // finalAmount is what was actually collected. totalAmount is pre-discount
+      // for visit invoices and post-discount for order invoices, so summing it
+      // both overstates revenue and mixes two different meanings.
+      select: { finalAmount: true, paidAt: true },
     });
 
     const grouped = {};
@@ -128,7 +147,7 @@ export const getRevenueReport = async (req, res, next) => {
         groupBy === "day"
           ? d.toISOString().slice(0, 10)
           : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      grouped[key] = (grouped[key] ?? 0) + Number(inv.totalAmount);
+      grouped[key] = (grouped[key] ?? 0) + Number(inv.finalAmount);
     }
 
     const report = Object.entries(grouped)

@@ -6,6 +6,7 @@ import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
 import {
   addBillingInterval,
   createSubscriptionForBusiness,
+  resolveFallbackPlanId,
 } from "../utils/subscription.js";
 
 const ACTIVE_STATUSES = ["TRIALING", "ACTIVE", "PAST_DUE"];
@@ -133,20 +134,35 @@ export const cancelSubscription = async (req, res, next) => {
     const userId = req.user?.id || req.user?.userId;
     const now = new Date();
 
-    const updated = await prisma.subscription.update({
-      where: { id: subscription.id },
-      data: immediate
-        ? {
-            status: "CANCELLED",
-            cancelledAt: now,
-            cancelledById: userId,
-            cancelReason: cancelReason || null,
-          }
-        : {
-            cancelAtPeriodEnd: true,
-            cancelledById: userId,
-            cancelReason: cancelReason || null,
-          },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.subscription.update({
+        where: { id: subscription.id },
+        data: immediate
+          ? {
+              status: "CANCELLED",
+              cancelledAt: now,
+              cancelledById: userId,
+              cancelReason: cancelReason || null,
+            }
+          : {
+              cancelAtPeriodEnd: true,
+              cancelledById: userId,
+              cancelReason: cancelReason || null,
+            },
+      });
+
+      // Only the EXPIRED sweep used to reset the plan, and a CANCELLED row is
+      // never picked up by that sweep — so an immediate cancellation left the
+      // business on its paid tier's limits forever, with no billing behind it.
+      if (immediate) {
+        const fallbackPlanId = await resolveFallbackPlanId(tx);
+        await tx.business.update({
+          where: { id: businessId },
+          data: { planId: fallbackPlanId },
+        });
+      }
+
+      return result;
     });
 
     res.status(200).json({
@@ -192,7 +208,11 @@ export const getSubscriptionHistory = async (req, res, next) => {
       return next(new AppError("Business ID is required", 400));
     }
 
-    const { page, limit, skip, sort, order } = pagination(req);
+    // Subscription has no name/email column — the default sort list would let
+    // ?sort=email through to Prisma and 500.
+    const { page, limit, skip, sort, order } = pagination(req, {
+      allowedSortFields: ["updatedAt", "startDate", "currentPeriodEnd", "status"],
+    });
 
     const [subscriptions, total] = await prisma.$transaction([
       prisma.subscription.findMany({

@@ -1,6 +1,68 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
+import { getAccessibleBusinessIds } from "../utils/checkBranchAccess.js";
+import { hasPermission } from "../utils/hasPermission.js";
+
+// userPermission rows are global (no branch column) and hasPermission consults
+// them before rolePermission, so a grant here takes effect everywhere at once.
+// Both guards below exist because nothing else in the chain applies them.
+
+// The target must live inside the caller's tenant — reachable either as staff
+// of one of their branches or as the owner of one of their businesses.
+const assertTargetInCallersTenant = async (req, targetUserId) => {
+  const callerId = req.user?.id || req.user?.userId;
+  const roleName = req.user?.roleName;
+
+  if (roleName === "DEVELOPER") return;
+  if (targetUserId === callerId) return;
+
+  const businessIds = await getAccessibleBusinessIds(callerId, roleName);
+  if (!businessIds || businessIds.length === 0) {
+    throw new AppError("You cannot manage permissions for this user", 403);
+  }
+
+  const [sharesBranch, ownsUser] = await Promise.all([
+    prisma.staffProfile.findFirst({
+      where: { userId: targetUserId, branch: { businessId: { in: businessIds } } },
+      select: { id: true },
+    }),
+    prisma.business.findFirst({
+      where: { id: { in: businessIds }, ownerId: targetUserId },
+      select: { id: true },
+    }),
+  ]);
+
+  if (!sharesBranch && !ownsUser) {
+    throw new AppError("You cannot manage permissions for this user", 403);
+  }
+};
+
+// You cannot grant what you do not hold.
+const assertGrantorHoldsPermissions = async (req, permissionIds) => {
+  const roleName = req.user?.roleName;
+  if (roleName === "DEVELOPER" || roleName === "OWNER") return;
+
+  const permissions = await prisma.permission.findMany({
+    where: { id: { in: permissionIds } },
+    select: { name: true },
+  });
+
+  for (const permission of permissions) {
+    const allowed = await hasPermission(
+      req.user?.id || req.user?.userId,
+      req.user?.roleId,
+      roleName,
+      permission.name,
+    );
+    if (!allowed) {
+      throw new AppError(
+        `You cannot grant a permission you do not hold: ${permission.name}`,
+        403,
+      );
+    }
+  }
+};
 
 export const createUserPermission = async (req, res, next) => {
   try {
@@ -41,6 +103,9 @@ export const createUserPermission = async (req, res, next) => {
       return next(new AppError("One or more permissions not found", 404));
     }
 
+    await assertTargetInCallersTenant(req, userId);
+    await assertGrantorHoldsPermissions(req, permissionIds);
+
     const userPermission = await prisma.userPermission.createMany({
       data: permissionIds.map((permissionId) => ({
         userId,
@@ -65,6 +130,8 @@ export const getUserPermissionByUserId = async (req, res, next) => {
     if (!userId) {
       return next(new AppError("UserId is required", 400));
     }
+
+    await assertTargetInCallersTenant(req, userId);
 
     const { page, limit, skip, sort, order } = pagination(req);
 
@@ -192,6 +259,9 @@ export const updateUserPermissionByUserId = async (req, res, next) => {
       return next(new AppError("One or more permissions not found", 404));
     }
 
+    await assertTargetInCallersTenant(req, userId);
+    await assertGrantorHoldsPermissions(req, uniquePermissionIds);
+
     const result = await prisma.$transaction(async (tx) => {
       const existingUserPermissions = await tx.userPermission.findMany({
         where: {
@@ -289,6 +359,8 @@ export const deleteUserPermissionByUserId = async (req, res, next) => {
     if (!userId) {
       return next(new AppError("UserId is required", 400));
     }
+    await assertTargetInCallersTenant(req, userId);
+
     const deleteResult = await prisma.userPermission.deleteMany({
       where: { userId },
     });
@@ -327,6 +399,8 @@ export const deleteSpecificUserPermissions = async (req, res, next) => {
     ) {
       return next(new AppError("PermissionIds are required", 400));
     }
+    await assertTargetInCallersTenant(req, userId);
+
     const deleteResult = await prisma.userPermission.deleteMany({
       where: {
         userId,

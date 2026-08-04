@@ -5,6 +5,8 @@ import { compressAndUpload } from "../utils/cloudinary.js";
 import { incrementStorageUsage } from "../utils/storageUsage.js";
 import { redisClient } from "../configs/redis.js";
 import { invalidateSpaceCache } from "./spaceAvailability.js";
+import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
+import { assertResourceNotInUse } from "../utils/resourceAvailability.js";
 
 const SpaceType = ["PRIVATE", "PUBLIC", "DESK", "MEETING", "VIP", "OTHER"];
 const PricingType = ["PER_HOUR", "PER_SESSION", "PER_GAME"];
@@ -40,6 +42,7 @@ export const createSpace = async (req, res, next) => {
       name,
       type,
       capacity,
+      bookingCapacity,
       isActive,
       customTypeLabel,
       priceType,
@@ -68,21 +71,41 @@ export const createSpace = async (req, res, next) => {
       isActive !== undefined ? parseBooleanInput(isActive, "isActive") : true;
 
     // Only PUBLIC spaces hold multiple resources (devices/units) and accept a
-    // capacity from the client. Every other type is single-use: capacity is
-    // always 1 and any client-supplied value is ignored.
-    let normalizedCapacity;
+    // bookingCapacity from the client. Every other type is single-use:
+    // bookingCapacity is always 1 and any client-supplied value is ignored.
+    // bookingCapacity is the availability logic field (seeds/caps availableNumber).
+    let normalizedBookingCapacity;
     if (normalizedType === "PUBLIC") {
-      if (capacity === undefined || capacity === null || capacity === "") {
+      if (
+        bookingCapacity === undefined ||
+        bookingCapacity === null ||
+        bookingCapacity === ""
+      ) {
         return next(
-          new AppError("capacity is required for PUBLIC spaces", 400),
+          new AppError("bookingCapacity is required for PUBLIC spaces", 400),
         );
       }
+      normalizedBookingCapacity = Number(bookingCapacity);
+      if (
+        !Number.isInteger(normalizedBookingCapacity) ||
+        normalizedBookingCapacity <= 0
+      ) {
+        return next(
+          new AppError("bookingCapacity must be a positive integer", 400),
+        );
+      }
+    } else {
+      normalizedBookingCapacity = 1;
+    }
+
+    // capacity is a display-only value the frontend supplies for all space
+    // types. It is not used in any availability logic.
+    let normalizedCapacity = 0;
+    if (capacity !== undefined && capacity !== null && capacity !== "") {
       normalizedCapacity = Number(capacity);
       if (!Number.isInteger(normalizedCapacity) || normalizedCapacity <= 0) {
         return next(new AppError("capacity must be a positive integer", 400));
       }
-    } else {
-      normalizedCapacity = 1;
     }
 
     const normalizedPriceType = String(priceType || "PER_HOUR").toUpperCase();
@@ -127,7 +150,8 @@ export const createSpace = async (req, res, next) => {
           name,
           type: normalizedType,
           capacity: normalizedCapacity,
-          availableNumber: normalizedCapacity,
+          bookingCapacity: normalizedBookingCapacity,
+          availableNumber: normalizedBookingCapacity,
           priceType: normalizedPriceType,
           price: Number(price || 0),
           isBusy: false,
@@ -174,6 +198,7 @@ export const getSpaceById = async (req, res, next) => {
         customTypeLabel: true,
         image: true,
         capacity: true,
+        bookingCapacity: true,
         availableNumber: true,
         priceType: true,
         price: true,
@@ -408,9 +433,7 @@ export const getSpaceByIsActive = async (req, res, next) => {
         new AppError("No spaces found with the specified isActive status", 404),
       );
     }
-    res
-      .status(200)
-      .json({ success: true, data: spaces, source: "database" });
+    res.status(200).json({ success: true, data: spaces, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -442,9 +465,7 @@ export const getSpacesByType = async (req, res, next) => {
     if (!spaces || spaces.length === 0) {
       return next(new AppError("No spaces found with the specified type", 404));
     }
-    res
-      .status(200)
-      .json({ success: true, data: spaces, source: "database" });
+    res.status(200).json({ success: true, data: spaces, source: "database" });
   } catch (error) {
     next(error);
   }
@@ -472,6 +493,11 @@ export const deleteSpaceById = async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
+      await assertResourceNotInUse(tx, {
+        resourceType: "SPACE",
+        resourceId: spaceId,
+      });
+
       // Soft delete the space
       await tx.space.update({
         where: { id: spaceId },
@@ -483,11 +509,12 @@ export const deleteSpaceById = async (req, res, next) => {
       });
     });
 
-    // Invalidate cache for this branch
+    // Invalidate cache for this branch, plus the by-id key — without the
+    // latter GET /spaces/getById/:spaceId kept serving the deleted space as
+    // bookable until TTL_BY_ID expired.
     const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
-    if (keysToDelete.length > 0) {
-      await redisClient.del(keysToDelete);
-    }
+    keysToDelete.push(`space:${spaceId}`);
+    await redisClient.del(keysToDelete);
 
     res
       .status(200)
@@ -578,6 +605,7 @@ export const updateSpaceById = async (req, res, next) => {
       "name",
       "type",
       "capacity",
+      "bookingCapacity",
       "availableNumber",
       "priceType",
       "price",
@@ -626,10 +654,23 @@ export const updateSpaceById = async (req, res, next) => {
       }
     }
 
+    // capacity is display-only: validate shape but never drive availability.
     if (updates.capacity !== undefined) {
       updates.capacity = Number(updates.capacity);
       if (!Number.isInteger(updates.capacity) || updates.capacity <= 0) {
         return next(new AppError("capacity must be a positive integer", 400));
+      }
+    }
+
+    if (updates.bookingCapacity !== undefined) {
+      updates.bookingCapacity = Number(updates.bookingCapacity);
+      if (
+        !Number.isInteger(updates.bookingCapacity) ||
+        updates.bookingCapacity <= 0
+      ) {
+        return next(
+          new AppError("bookingCapacity must be a positive integer", 400),
+        );
       }
     }
 
@@ -658,11 +699,11 @@ export const updateSpaceById = async (req, res, next) => {
       return next(new AppError("Space not found", 404));
     }
 
-    // Non-PUBLIC spaces are single-use: capacity is always 1 and any
-    // client-supplied capacity is ignored. Keep availableNumber within [0, 1].
+    // Non-PUBLIC spaces are single-use: bookingCapacity is always 1 and any
+    // client-supplied value is ignored. Keep availableNumber within [0, 1].
     const effectiveType = updates.type ?? existingSpace.type;
     if (effectiveType !== "PUBLIC") {
-      updates.capacity = 1;
+      updates.bookingCapacity = 1;
       const currentAvailable =
         updates.availableNumber !== undefined
           ? updates.availableNumber
@@ -680,29 +721,44 @@ export const updateSpaceById = async (req, res, next) => {
       }
     }
 
-    if (
-      updates.availableNumber !== undefined &&
-      updates.capacity !== undefined &&
-      updates.availableNumber > updates.capacity
-    ) {
-      return next(new AppError("availableNumber cannot exceed capacity", 400));
+    // Validate the invariant against the MERGED post-update values. Checking
+    // only when availableNumber was supplied let `PATCH {bookingCapacity: 1}`
+    // land on a PUBLIC space holding availableNumber 5 — reserve only tests
+    // `availableNumber > 0`, so five sessions could enter a one-slot space.
+    const effectiveAvailable =
+      updates.availableNumber !== undefined
+        ? updates.availableNumber
+        : existingSpace.availableNumber;
+    const effectiveBookingCapacity =
+      updates.bookingCapacity !== undefined
+        ? updates.bookingCapacity
+        : existingSpace.bookingCapacity;
+
+    if (effectiveAvailable > effectiveBookingCapacity) {
+      return next(
+        new AppError(
+          `availableNumber (${effectiveAvailable}) cannot exceed bookingCapacity (${effectiveBookingCapacity}). Lower availableNumber in the same request, or free the space first.`,
+          400,
+        ),
+      );
     }
 
-    if (updates.availableNumber !== undefined && updates.isBusy === undefined) {
-      updates.isBusy = updates.availableNumber === 0;
-    }
+    // isBusy is derived, never client-set: accepting it directly let it drift
+    // from availableNumber and hide a space that was actually free.
+    updates.isBusy = effectiveAvailable === 0;
 
     const updatedSpace = await prisma.space.update({
       where: { id: spaceId },
       data: updates,
     });
 
-    // Invalidate all related caches for this branch (high-performance pattern)
-    await invalidateSpaceCache(branchId);
-    const keysToDelete = await redisClient.keys(`spaces:branchId=${branchId}*`);
-    if (keysToDelete.length > 0) {
-      await redisClient.del(keysToDelete);
-    }
+    // Invalidate all cached views that can show stale space data.
+    await Promise.all([
+      invalidateSpaceCache(branchId),
+      invalidateCacheByPattern(`space:${spaceId}`),
+      invalidateCacheByPattern(`spaces:branchId=${branchId}*`),
+      invalidateCacheByPattern(`space-history:${spaceId}*`),
+    ]);
 
     res.status(200).json({ success: true, data: updatedSpace });
   } catch (error) {

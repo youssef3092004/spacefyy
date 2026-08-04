@@ -1,6 +1,7 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
+import { assertResourceNotInUse } from "../utils/resourceAvailability.js";
 import { redisClient } from "../configs/redis.js";
 
 const EQUIPMENT_TYPES = [
@@ -344,9 +345,32 @@ export const updateEquipmentById = async (req, res, next) => {
       updates.quantity = parseInt(updates.quantity);
       if (isNaN(updates.quantity) || updates.quantity < 1)
         return next(new AppError("quantity must be a positive integer", 400));
+
+      // Capacity can't fall below what is already reserved, or the pool is
+      // oversubscribed the moment it's saved and every remaining-units message
+      // reads as a negative number.
+      const inUseAgg = await prisma.sessionComponent.aggregate({
+        where: { resourceType: "EQUIPMENT", resourceId: equipmentId, endedAt: null },
+        _sum: { quantity: true },
+      });
+      const inUse = inUseAgg._sum.quantity ?? 0;
+
+      if (updates.quantity < inUse) {
+        return next(
+          new AppError(
+            `quantity cannot be lower than the ${inUse} unit(s) currently in use. End those components first.`,
+            409,
+          ),
+        );
+      }
+
+      // isBusy is derived from the new capacity, never carried over stale.
+      updates.isBusy = inUse >= updates.quantity;
     }
 
-    if (updates.isBusy !== undefined) updates.isBusy = Boolean(updates.isBusy);
+    // isBusy is computed from live reservations, so a client-supplied value is
+    // ignored — accepting it let a fully-booked row advertise itself as free.
+    if (updates.quantity === undefined) delete updates.isBusy;
     if (updates.isActive !== undefined)
       updates.isActive =
         updates.isActive === "false" ? false : Boolean(updates.isActive);
@@ -392,13 +416,20 @@ export const deleteEquipmentById = async (req, res, next) => {
     });
     if (!equipment) return next(new AppError("Equipment not found", 404));
 
-    await prisma.equipment.update({
-      where: { id: equipmentId },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        deletedBy: req.user.id,
-      },
+    await prisma.$transaction(async (tx) => {
+      await assertResourceNotInUse(tx, {
+        resourceType: "EQUIPMENT",
+        resourceId: equipmentId,
+      });
+
+      await tx.equipment.update({
+        where: { id: equipmentId },
+        data: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: req.user.id,
+        },
+      });
     });
 
     await Promise.all([

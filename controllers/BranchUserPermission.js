@@ -1,6 +1,74 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
+import {
+  checkBranchAccess,
+  getAccessibleBranchIds,
+} from "../utils/checkBranchAccess.js";
+import { hasPermission } from "../utils/hasPermission.js";
+
+// The route middleware only sees req.params/query/body.branchId — this endpoint
+// writes to body.branchIds, an entirely different key. Every branch named there
+// has to be one the caller can actually reach.
+const assertBranchesReachable = async (req, branchIds) => {
+  const userId = req.user?.id || req.user?.userId;
+  const roleName = req.user?.roleName;
+
+  for (const branchId of branchIds) {
+    const hasAccess = await checkBranchAccess(userId, roleName, branchId);
+    if (!hasAccess) {
+      throw new AppError(`You do not have access to branch ${branchId}`, 403);
+    }
+  }
+};
+
+// Returns the branch filter to apply to a bulk read/delete: the requested
+// branch when one is given, otherwise every branch the caller can reach.
+// DEVELOPER gets no filter at all.
+const getReachableBranchScope = async (req, requestedBranchId) => {
+  if (requestedBranchId) {
+    await assertBranchesReachable(req, [requestedBranchId]);
+    return { branchId: requestedBranchId };
+  }
+
+  if (req.user?.roleName === "DEVELOPER") return {};
+
+  const branchIds = await getAccessibleBranchIds(
+    req.user?.id || req.user?.userId,
+    req.user?.roleName,
+  );
+  return { branchId: { in: branchIds } };
+};
+
+// You cannot grant what you do not hold — otherwise any ADMIN could mint
+// permissions they were never given, on any account.
+const assertGrantorHoldsPermissions = async (req, permissionIds, branchIds) => {
+  const roleName = req.user?.roleName;
+  if (roleName === "DEVELOPER" || roleName === "OWNER") return;
+
+  const permissions = await prisma.permission.findMany({
+    where: { id: { in: permissionIds } },
+    select: { id: true, name: true },
+  });
+
+  for (const permission of permissions) {
+    for (const branchId of branchIds) {
+      const allowed = await hasPermission(
+        req.user?.id || req.user?.userId,
+        req.user?.roleId,
+        roleName,
+        permission.name,
+        branchId,
+      );
+      if (!allowed) {
+        throw new AppError(
+          `You cannot grant a permission you do not hold: ${permission.name}`,
+          403,
+        );
+      }
+    }
+  }
+};
 
 export const createBranchUserPermission = async (req, res, next) => {
   try {
@@ -29,12 +97,19 @@ export const createBranchUserPermission = async (req, res, next) => {
       return next(new AppError("One or more branch IDs not found", 404));
     }
 
+    if (existingBranches.length !== branchIds.length) {
+      return next(new AppError("One or more branch IDs not found", 404));
+    }
+
     const existingPermissions = await prisma.permission.findMany({
       where: { id: { in: permissionIds } },
     });
     if (existingPermissions.length !== permissionIds.length) {
       return next(new AppError("One or more permission IDs not found", 404));
     }
+
+    await assertBranchesReachable(req, branchIds);
+    await assertGrantorHoldsPermissions(req, permissionIds, branchIds);
 
     const data = [];
     for (const branchId of branchIds) {
@@ -138,6 +213,9 @@ export const updateBranchUserPermissionByUserId = async (req, res, next) => {
       return next(new AppError("isAllowed must be a boolean value", 400));
     }
 
+    await assertBranchesReachable(req, [branchId]);
+    await assertGrantorHoldsPermissions(req, permissionIds, [branchId]);
+
     const updateResult = await prisma.branchUserPermission.updateMany({
       where: {
         userId,
@@ -182,9 +260,13 @@ export const deleteSpecificBranchUserPermissionByUserId = async (
       return next(new AppError("permissionIds must be a non-empty array", 400));
     }
 
+    // With no branchId this would strip a user's grants across every branch on
+    // the platform, including another tenant's isAllowed:false denials.
+    const reachableBranchIds = await getReachableBranchScope(req, branchId);
+
     const where = {
       userId,
-      ...(branchId ? { branchId } : {}),
+      ...reachableBranchIds,
       ...(permissionIds ? { permissionId: { in: permissionIds } } : {}),
     };
 
@@ -217,7 +299,7 @@ export const deleteBranchUserPermissionByUserId = async (req, res, next) => {
       return next(new AppError("UserId is required", 400));
     }
     const deleteResult = await prisma.branchUserPermission.deleteMany({
-      where: { userId },
+      where: { userId, ...(await getReachableBranchScope(req, null)) },
     });
     if (deleteResult.count === 0) {
       return next(new AppError("No permissions found to delete", 404));

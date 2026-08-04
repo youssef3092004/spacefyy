@@ -31,6 +31,7 @@ export const createPlan = async (req, res, next) => {
       maxUnits,
       maxEquipment,
       maxUsers,
+      maxShiftsPerDay,
     } = req.body;
 
     const requiredFields = {
@@ -46,7 +47,10 @@ export const createPlan = async (req, res, next) => {
       maxUsers,
     };
     for (const field in requiredFields) {
-      if (!requiredFields[field]) {
+      // `=== undefined`, not falsy: a FREE plan has price 0, and 0 is a
+      // legitimate value for every max* limit. The falsy check rejected both
+      // as "is required", making a free plan uncreatable through the API.
+      if (requiredFields[field] === undefined || requiredFields[field] === null) {
         return next(
           new AppError(
             `${field.charAt(0).toUpperCase() + field.slice(1)} is required`,
@@ -54,6 +58,16 @@ export const createPlan = async (req, res, next) => {
           ),
         );
       }
+    }
+
+    if (
+      maxShiftsPerDay !== undefined &&
+      maxShiftsPerDay !== null &&
+      (!Number.isInteger(Number(maxShiftsPerDay)) || Number(maxShiftsPerDay) < 1)
+    ) {
+      return next(
+        new AppError("maxShiftsPerDay must be a positive integer", 400),
+      );
     }
 
     const existingPlan = await prisma.plan.findFirst({
@@ -97,6 +111,12 @@ export const createPlan = async (req, res, next) => {
         maxUnits,
         maxEquipment,
         maxUsers,
+        // Enforced by openShift, but absent from this payload it was always
+        // null, so the plan's shift limit never applied to anyone.
+        maxShiftsPerDay:
+          maxShiftsPerDay === undefined || maxShiftsPerDay === null
+            ? null
+            : Number(maxShiftsPerDay),
       },
     });
 
@@ -201,6 +221,7 @@ export const updatePlanById = async (req, res, next) => {
       "maxUnits",
       "maxEquipment",
       "maxUsers",
+      "maxShiftsPerDay",
     ];
 
     const updates = { ...req.body };
@@ -253,6 +274,21 @@ export const updatePlanById = async (req, res, next) => {
 
     if (sanitizedUpdates.isPublic !== undefined) {
       sanitizedUpdates.isPublic = Boolean(sanitizedUpdates.isPublic);
+    }
+
+    if (sanitizedUpdates.maxShiftsPerDay !== undefined) {
+      // null clears the limit; anything else must be a positive integer.
+      if (sanitizedUpdates.maxShiftsPerDay === null) {
+        sanitizedUpdates.maxShiftsPerDay = null;
+      } else {
+        const parsed = Number(sanitizedUpdates.maxShiftsPerDay);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return next(
+            new AppError("maxShiftsPerDay must be a positive integer", 400),
+          );
+        }
+        sanitizedUpdates.maxShiftsPerDay = parsed;
+      }
     }
 
     const updatedPlan = await prisma.plan.update({

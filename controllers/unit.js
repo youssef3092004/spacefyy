@@ -1,6 +1,7 @@
 import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
+import { assertResourceNotInUse } from "../utils/resourceAvailability.js";
 import { redisClient } from "../configs/redis.js";
 import { invalidateSpaceCache } from "./spaceAvailability.js";
 
@@ -411,13 +412,20 @@ export const deleteUnitById = async (req, res, next) => {
     });
     if (!unit) return next(new AppError("Unit not found", 404));
 
-    await prisma.unit.update({
-      where: { id: unitId },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        deletedBy: req.user.id,
-      },
+    await prisma.$transaction(async (tx) => {
+      await assertResourceNotInUse(tx, {
+        resourceType: "UNIT",
+        resourceId: unitId,
+      });
+
+      await tx.unit.update({
+        where: { id: unitId },
+        data: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: req.user.id,
+        },
+      });
     });
 
     await Promise.all([

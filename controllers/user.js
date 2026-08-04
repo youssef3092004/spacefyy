@@ -12,6 +12,7 @@ import bcrypt from "bcrypt";
 import process from "process";
 import { messages } from "../locales/message.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
+import { invalidateUserAuthCache } from "../middleware/auth.js";
 
 export const getAllUsers = async (req, res, next) => {
   try {
@@ -114,6 +115,8 @@ export const deleteUserById = async (req, res, next) => {
         deletedBy: req.user.id,
       },
     });
+
+    invalidateUserAuthCache(id);
 
     await redisClient.del(`user:${id}`);
     const listKeys = await redisClient.keys("users:*");
@@ -265,6 +268,8 @@ export const updateUserById = async (req, res, next) => {
         role: { select: { id: true, name: true } },
       },
     });
+    // A role change must take effect on the next request, not after the TTL.
+    invalidateUserAuthCache(id);
     await redisClient.del(`user:${id}`);
     const cacheKeys = await redisClient.keys("users:*");
     if (cacheKeys.length > 0) {
@@ -295,6 +300,7 @@ export const getUserByRoleName = async (req, res, next) => {
     }
     const users = await prisma.user.findMany({
       where: { roleId: role.id, isDeleted: false },
+      omit: { password: true },
       skip,
       take: limit,
       orderBy: { [sort]: order },
@@ -324,6 +330,58 @@ export const getUserByRoleName = async (req, res, next) => {
   }
 };
 
+/**
+ * Effective permissions for a user, resolved with the same precedence that
+ * hasPermission() enforces at request time: branch override → user override →
+ * role grant. Keeping these in step matters — the frontend shows and hides UI
+ * from this list, so any divergence surfaces as a button that 403s.
+ *
+ * @returns {Promise<Array<{id: string, name: string, allowed: boolean}>>}
+ */
+const resolveEffectivePermissions = async ({
+  userId,
+  roleId,
+  roleName,
+  branchId,
+}) => {
+  // Mirrors the short-circuit at the top of hasPermission().
+  if (roleName === "OWNER" || roleName === "DEVELOPER") {
+    const all = await prisma.permission.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    return all.map((p) => ({ ...p, allowed: true }));
+  }
+
+  if (!roleId) return [];
+
+  // A null branchId makes the bup join match nothing, which is correct: with no
+  // branch there are no branch-scoped overrides to apply.
+  return prisma.$queryRaw`
+    SELECT
+      p.id,
+      p.name,
+      COALESCE(
+        bup."isAllowed",
+        up."isAllowed",
+        (rp."permissionId" IS NOT NULL)
+      ) AS allowed
+    FROM "Permission" p
+    LEFT JOIN "BranchUserPermission" bup
+      ON bup."permissionId" = p.id
+     AND bup."userId" = ${userId}
+     AND bup."branchId" = ${branchId}
+    LEFT JOIN "UserPermission" up
+      ON up."permissionId" = p.id AND up."userId" = ${userId}
+    LEFT JOIN "RolePermission" rp
+      ON rp."permissionId" = p.id AND rp."roleId" = ${roleId}
+    WHERE bup."permissionId" IS NOT NULL
+       OR up."permissionId" IS NOT NULL
+       OR rp."permissionId" IS NOT NULL
+    ORDER BY p.name ASC
+  `;
+};
+
 export const getMe = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -338,7 +396,10 @@ export const getMe = async (req, res, next) => {
         },
         businesses: true,
         staffProfile: {
-          select: { branchId: true },
+          select: {
+            branchId: true,
+            branch: { select: { business: true } },
+          },
         },
       },
     });
@@ -354,12 +415,32 @@ export const getMe = async (req, res, next) => {
         ? (staffProfile?.branchId ?? null)
         : null;
 
+    // `businesses` is the owned-businesses relation, so it is empty for STAFF
+    // and ADMIN. Fall back to the business behind their branch so every user
+    // reports the business they belong to in the same shape.
+    const staffBusiness = staffProfile?.branch?.business ?? null;
+    const businesses =
+      userWithoutPassword.businesses.length > 0
+        ? userWithoutPassword.businesses
+        : staffBusiness
+          ? [staffBusiness]
+          : [];
+
+    const permissions = await resolveEffectivePermissions({
+      userId,
+      roleId: user.roleId,
+      roleName: userType,
+      branchId,
+    });
+
     res.status(200).json({
       success: true,
       data: {
         ...userWithoutPassword,
+        businesses,
         userType,
         branchId,
+        permissions,
       },
       source: "database",
     });
@@ -380,7 +461,6 @@ export const getAllPermissionsByUserId = async (req, res, next) => {
     if (!user) {
       return next(new AppError("User not found", 404));
     }
-
 
     const result = await prisma.$queryRaw`
       SELECT

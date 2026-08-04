@@ -2,6 +2,7 @@ import { prisma } from "../configs/db.js";
 import { AppError } from "../utils/appError.js";
 import { validatePrice } from "../utils/validation.js";
 import cloudinary from "../configs/cloud.js";
+import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
 
 // ─── Private Helpers ──────────────────────────────────────────────────────────
 
@@ -15,7 +16,13 @@ const formatProduct = ({ alertIsActivated, alertValue, stock, ...rest }) => ({
   },
 });
 
-const SORT_FIELDS = new Set(["createdAt", "updatedAt", "name", "price", "stock"]);
+const SORT_FIELDS = new Set([
+  "createdAt",
+  "updatedAt",
+  "name",
+  "price",
+  "stock",
+]);
 
 const parsePagination = (req) => {
   const sort = req.query.sort || "createdAt";
@@ -71,6 +78,13 @@ const uploadImage = (buffer) =>
       .end(buffer);
   });
 
+const invalidateProductCaches = async () => {
+  await Promise.all([
+    invalidateCacheByPattern("products:*"),
+    invalidateCacheByPattern("product:*"),
+  ]);
+};
+
 // Handles boolean values from both JSON bodies (boolean) and multipart forms (string)
 const parseBoolean = (val) => {
   if (typeof val === "boolean") return val;
@@ -124,7 +138,15 @@ const buildProductSummary = async (branchId) => {
   const now = new Date();
   const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  const endOfLastMonth = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    0,
+    23,
+    59,
+    59,
+    999,
+  );
 
   const [
     totalProducts,
@@ -137,30 +159,55 @@ const buildProductSummary = async (branchId) => {
     lowStockProducts,
   ] = await Promise.all([
     prisma.product.count({ where: { branchId } }),
-    prisma.product.count({ where: { branchId, createdAt: { gte: startOfThisMonth } } }),
-    prisma.product.count({ where: { branchId, createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } } }),
+    prisma.product.count({
+      where: { branchId, createdAt: { gte: startOfThisMonth } },
+    }),
+    prisma.product.count({
+      where: {
+        branchId,
+        createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+      },
+    }),
     prisma.orderItem.aggregate({
       where: { order: { branchId, createdAt: { gte: startOfThisMonth } } },
       _sum: { totalPrice: true },
     }),
     prisma.orderItem.aggregate({
-      where: { order: { branchId, createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } } },
+      where: {
+        order: {
+          branchId,
+          createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+        },
+      },
       _sum: { totalPrice: true },
     }),
-    prisma.orderItem.findMany({
-      where: { order: { branchId, createdAt: { gte: startOfThisMonth } } },
-      select: { productId: true },
-      distinct: ["productId"],
-    }).then((r) => r.length),
-    prisma.orderItem.findMany({
-      where: { order: { branchId, createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } } },
-      select: { productId: true },
-      distinct: ["productId"],
-    }).then((r) => r.length),
-    prisma.product.findMany({
-      where: { branchId, alertIsActivated: true },
-      select: { stock: true, alertValue: true },
-    }).then((products) => products.filter((p) => p.stock <= p.alertValue).length),
+    prisma.orderItem
+      .findMany({
+        where: { order: { branchId, createdAt: { gte: startOfThisMonth } } },
+        select: { productId: true },
+        distinct: ["productId"],
+      })
+      .then((r) => r.length),
+    prisma.orderItem
+      .findMany({
+        where: {
+          order: {
+            branchId,
+            createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          },
+        },
+        select: { productId: true },
+        distinct: ["productId"],
+      })
+      .then((r) => r.length),
+    prisma.product
+      .findMany({
+        where: { branchId, alertIsActivated: true },
+        select: { stock: true, alertValue: true },
+      })
+      .then(
+        (products) => products.filter((p) => p.stock <= p.alertValue).length,
+      ),
   ]);
 
   const revThis = Number(revenueThisMonth._sum.totalPrice ?? 0);
@@ -169,10 +216,22 @@ const buildProductSummary = async (branchId) => {
   const avgLast = soldLastMonth > 0 ? revLast / soldLastMonth : 0;
 
   return {
-    totalProducts: makeMetric(totalProducts, calcChange(newThisMonth, newLastMonth)),
-    newThisMonth: makeMetric(newThisMonth, calcChange(newThisMonth, newLastMonth)),
-    totalRevenue: makeMetric(Math.round(revThis * 100) / 100, calcChange(revThis, revLast)),
-    avgRevenuePerProduct: makeMetric(Math.round(avgThis * 100) / 100, calcChange(avgThis, avgLast)),
+    totalProducts: makeMetric(
+      totalProducts,
+      calcChange(newThisMonth, newLastMonth),
+    ),
+    newThisMonth: makeMetric(
+      newThisMonth,
+      calcChange(newThisMonth, newLastMonth),
+    ),
+    totalRevenue: makeMetric(
+      Math.round(revThis * 100) / 100,
+      calcChange(revThis, revLast),
+    ),
+    avgRevenuePerProduct: makeMetric(
+      Math.round(avgThis * 100) / 100,
+      calcChange(avgThis, avgLast),
+    ),
     lowStockAlerts: lowStockProducts,
   };
 };
@@ -199,7 +258,9 @@ const buildAnalyticsMap = async (productIds) => {
         totalRevenue: Math.round(Number(s._sum.totalPrice ?? 0) * 100) / 100,
         lastOrderAt: s._max.createdAt,
         firstOrderAt: s._min.createdAt,
-        avgQuantityPerOrder: s._avg.quantity ? Math.round(s._avg.quantity * 10) / 10 : 0,
+        avgQuantityPerOrder: s._avg.quantity
+          ? Math.round(s._avg.quantity * 10) / 10
+          : 0,
       },
     ]),
   );
@@ -219,8 +280,17 @@ const emptyAnalytics = () => ({
 export const createProduct = async (req, res, next) => {
   try {
     const { branchId } = req.params;
-    const { name, price, categoryId, description, sku, stock, isActive, alertIsActivated, alertValue } =
-      req.body;
+    const {
+      name,
+      price,
+      categoryId,
+      description,
+      sku,
+      stock,
+      isActive,
+      alertIsActivated,
+      alertValue,
+    } = req.body;
 
     if (!name || !price || !categoryId) {
       return next(
@@ -251,11 +321,14 @@ export const createProduct = async (req, res, next) => {
 
     const parsedAlertValue = alertValue !== undefined ? Number(alertValue) : 0;
     if (!Number.isInteger(parsedAlertValue) || parsedAlertValue < 0) {
-      return next(new AppError("alertValue must be a non-negative integer", 400));
+      return next(
+        new AppError("alertValue must be a non-negative integer", 400),
+      );
     }
-    const parsedAlertIsActivated = alertIsActivated !== undefined
-      ? parseBoolean(alertIsActivated) ?? false
-      : false;
+    const parsedAlertIsActivated =
+      alertIsActivated !== undefined
+        ? (parseBoolean(alertIsActivated) ?? false)
+        : false;
 
     const product = await prisma.product.create({
       data: {
@@ -275,6 +348,8 @@ export const createProduct = async (req, res, next) => {
         category: { select: { id: true, name: true } },
       },
     });
+
+    await invalidateProductCaches();
 
     return res.status(201).json({
       success: true,
@@ -312,7 +387,10 @@ export const getProductById = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: { ...formatProduct(product), analytics: analyticsMap[product.id] ?? emptyAnalytics() },
+      data: {
+        ...formatProduct(product),
+        analytics: analyticsMap[product.id] ?? emptyAnalytics(),
+      },
       source: "database",
     });
   } catch (error) {
@@ -537,7 +615,9 @@ export const updateProduct = async (req, res, next) => {
     if (req.body.alertValue !== undefined) {
       const val = Number(req.body.alertValue);
       if (!Number.isInteger(val) || val < 0) {
-        return next(new AppError("alertValue must be a non-negative integer", 400));
+        return next(
+          new AppError("alertValue must be a non-negative integer", 400),
+        );
       }
       updateData.alertValue = val;
     }
@@ -560,6 +640,8 @@ export const updateProduct = async (req, res, next) => {
         branch: { select: { id: true, name: true } },
       },
     });
+
+    await invalidateProductCaches();
 
     return res.status(200).json({
       success: true,
@@ -596,6 +678,8 @@ export const toggleProductStatus = async (req, res, next) => {
       select: { id: true, name: true, isActive: true, updatedAt: true },
     });
 
+    await invalidateProductCaches();
+
     const label = updated.isActive ? "activated" : "deactivated";
     return res.status(200).json({
       success: true,
@@ -603,7 +687,8 @@ export const toggleProductStatus = async (req, res, next) => {
       data: updated,
     });
   } catch (error) {
-    if (error.code === "P2025") return next(new AppError("Product not found", 404));
+    if (error.code === "P2025")
+      return next(new AppError("Product not found", 404));
     next(error);
   }
 };
@@ -625,41 +710,66 @@ export const adjustStock = async (req, res, next) => {
 
     const parsedAmount = Number(amount);
     if (!Number.isInteger(parsedAmount) || parsedAmount < 0) {
-      return next(
-        new AppError("amount must be a non-negative integer", 400),
-      );
+      return next(new AppError("amount must be a non-negative integer", 400));
     }
 
-    const product = await ensureProductExists(productId, {
+    // Existence check only — the new stock is derived by the database below,
+    // never from a value read here.
+    await ensureProductExists(productId, { id: true });
+
+    const stockSelect = {
       id: true,
       name: true,
       stock: true,
       alertIsActivated: true,
       alertValue: true,
-    });
+      updatedAt: true,
+    };
 
-    let newStock;
-    if (operation === "add") {
-      newStock = product.stock + parsedAmount;
-    } else if (operation === "subtract") {
-      newStock = product.stock - parsedAmount;
-      if (newStock < 0) {
+    // add/subtract are relative, so they must be atomic. Reading the stock and
+    // writing back an absolute total lost updates: two restocks of 5 landing
+    // together both read 10 and both wrote 15, so one delivery vanished. The
+    // same read-then-write also raced against an order's own decrement.
+    let updated;
+    if (operation === "set") {
+      updated = await prisma.product.update({
+        where: { id: productId },
+        data: { stock: parsedAmount },
+        select: stockSelect,
+      });
+    } else if (operation === "add") {
+      updated = await prisma.product.update({
+        where: { id: productId },
+        data: { stock: { increment: parsedAmount } },
+        select: stockSelect,
+      });
+    } else {
+      // Guarded so a concurrent order cannot let this drive stock negative.
+      const { count } = await prisma.product.updateMany({
+        where: { id: productId, stock: { gte: parsedAmount } },
+        data: { stock: { decrement: parsedAmount } },
+      });
+
+      if (count === 0) {
+        const current = await prisma.product.findUnique({
+          where: { id: productId },
+          select: { stock: true },
+        });
         return next(
           new AppError(
-            `Insufficient stock. Current: ${product.stock}, Requested: ${parsedAmount}`,
-            400,
+            `Insufficient stock. Current: ${current?.stock ?? 0}, Requested: ${parsedAmount}`,
+            409,
           ),
         );
       }
-    } else {
-      newStock = parsedAmount;
+
+      updated = await prisma.product.findUnique({
+        where: { id: productId },
+        select: stockSelect,
+      });
     }
 
-    const updated = await prisma.product.update({
-      where: { id: productId },
-      data: { stock: newStock },
-      select: { id: true, name: true, stock: true, alertIsActivated: true, alertValue: true, updatedAt: true },
-    });
+    await invalidateProductCaches();
 
     return res.status(200).json({
       success: true,
@@ -667,7 +777,8 @@ export const adjustStock = async (req, res, next) => {
       data: formatProduct(updated),
     });
   } catch (error) {
-    if (error.code === "P2025") return next(new AppError("Product not found", 404));
+    if (error.code === "P2025")
+      return next(new AppError("Product not found", 404));
     next(error);
   }
 };
@@ -687,9 +798,11 @@ export const deleteProduct = async (req, res, next) => {
     }
 
     await prisma.product.delete({ where: { id: productId } });
+    await invalidateProductCaches();
     return res.status(204).send();
   } catch (error) {
-    if (error.code === "P2025") return next(new AppError("Product not found", 404));
+    if (error.code === "P2025")
+      return next(new AppError("Product not found", 404));
     next(error);
   }
 };

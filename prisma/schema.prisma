@@ -412,6 +412,7 @@ model Branch {
   orders                Order[]
   invoices              Invoice[]
   shifts                Shift[]
+  gameModes             GameMode[]
 
   @@index([businessId])
   @@index([isActive])
@@ -567,7 +568,8 @@ model Space {
   type            SpaceType
   customTypeLabel String?
   image           String      @default("https://media.istockphoto.com/id/1472933890/vector/no-image-vector-symbol-missing-available-icon-no-gallery-for-this-moment-placeholder.jpg?s=2048x2048&w=is&k=20&c=Qw0wGz-a6BpwFjaoxtkjgsf75C-DeOYs7GFPU8O9z20=")
-  capacity        Int
+  capacity        Int         @default(0)
+  bookingCapacity Int         @default(1)
   availableNumber Int         @default(1)
   priceType       PricingType @default(PER_HOUR)
   price           Decimal     @default(0) @db.Decimal(10, 2)
@@ -676,6 +678,7 @@ model Equipment {
 
   branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
   pricingRules PricingRule[]
+  gameModes    GameMode[]    @relation("GameModeController")
 
   @@index([branchId])
   @@index([isDeleted])
@@ -886,7 +889,6 @@ model Customer {
   @@unique([businessId, seqNumber])
   @@unique([businessId, phone])
   @@unique([businessId, email])
-  @@unique([businessId, email, phone])
   @@index([businessId])
   @@index([phone])
   @@index([email])
@@ -1024,6 +1026,49 @@ model Session {
   @@index([visitId, branchId, deletedAt])
 }
 
+/// A named play mode for a branch — e.g. SGL (1v1) vs DBL (2v2).
+///
+/// The device's own rate never changes between modes; the extra cost of a
+/// bigger mode comes entirely from the controllers it requires, which the
+/// backend adds and removes automatically on a mode switch.
+model GameMode {
+  id       String @id @default(uuid())
+  branchId String
+
+  code    String /// machine key, uppercase, unique per branch: "SGL" / "DBL"
+  label   String /// shown in the switcher: "Single (1v1)"
+  labelAr String?
+
+  players             Int /// snapshotted onto the DEVICE/UNIT segment
+  controllersRequired Int @default(0)
+
+  /// Which controller row to add. A branch usually has several (DualSense,
+  /// Xbox, ...) and both pricing and the capacity check need one deterministic
+  /// target, so the mode names it rather than guessing by type.
+  controllerEquipmentId String?
+
+  /// Empty = the mode applies to every device/unit. DeviceType already encodes
+  /// seat counts (PS5_2 vs PS5_4), so DBL can be hidden on a 2-seat console.
+  deviceTypes DeviceType[] @default([])
+
+  sortOrder Int     @default(0)
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch              Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  controllerEquipment Equipment?         @relation("GameModeController", fields: [controllerEquipmentId], references: [id], onDelete: Restrict)
+  components          SessionComponent[]
+
+  // No soft delete: a nullable deletedAt in this unique would not stop two live
+  // "DBL" rows, since Postgres treats NULLs as distinct. Archive via isActive.
+  @@unique([branchId, code])
+  @@index([branchId, isActive, sortOrder])
+  @@index([controllerEquipmentId])
+}
+
 model SessionComponent {
   id        String @id @default(uuid())
   sessionId String
@@ -1040,7 +1085,14 @@ model SessionComponent {
   gamesCount Int         @default(0)
 
   players   Int? // snapshot of player count for DEVICE/UNIT segments; null for SPACE/EQUIPMENT
-  modeLabel String? // snapshot of the matched PricingRule's name (e.g. "SGL"/"DBL"); null if priced from base
+  modeLabel String? // snapshot of the mode name (e.g. "SGL"/"DBL"); null if priced from base
+
+  gameModeId String? // the GameMode this segment was billed under
+
+  /// True when the game-mode engine owns this row and may end or replace it on
+  /// a mode switch. Staff-added equipment stays false so a headset or an ad-hoc
+  /// controller the customer is paying for is never silently removed.
+  autoManaged Boolean @default(false)
 
   startedAt       DateTime
   endedAt         DateTime?
@@ -1052,6 +1104,7 @@ model SessionComponent {
 
   session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   pricingRule PricingRule? @relation(fields: [pricingRuleId], references: [id], onDelete: SetNull)
+  gameMode    GameMode?    @relation(fields: [gameModeId], references: [id], onDelete: SetNull)
 
   @@index([sessionId])
   @@index([branchId])
@@ -1059,6 +1112,9 @@ model SessionComponent {
   @@index([pricingRuleId])
   @@index([sessionId, resourceType])
   @@index([branchId, resourceType, resourceId])
+  @@index([gameModeId])
+  // Hot path for the mode switch and the controller-capacity aggregate.
+  @@index([sessionId, resourceType, endedAt])
 }
 
 model CategoryProduct {
@@ -1131,7 +1187,12 @@ model Order {
   orderItems OrderItem[]
   invoice    Invoice?
 
-  @@index([visitId])
+  // One order per visit: closeVisitCore sums every order on the visit, so a
+  // duplicate would bill the customer twice for one round. NULL visitId
+  // (takeaway) is exempt — Postgres allows many NULLs in a unique index.
+  @@unique([visitId])
+  // Receipt numbers must not repeat within a branch.
+  @@unique([branchId, number])
   @@index([branchId])
   @@index([customerId])
   @@index([createdAt])

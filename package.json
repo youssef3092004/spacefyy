@@ -17,7 +17,8 @@
     "seed:demo": "node --env-file=.env seeds/demoSeed.js",
     "seed:rbac": "node --env-file=.env seeds/rbac.js",
     "seed:permissions": "node --env-file=.env seeds/seedPermissionsAndRoles.js",
-    "seed:full": "node --env-file=.env seeds/fullSeed.js"
+    "seed:full": "node --env-file=.env seeds/fullSeed.js",
+    "test:game-mode": "node --env-file=.env scripts/verifyGameMode.js"
   },
   "repository": {
     "type": "git",

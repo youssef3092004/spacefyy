@@ -36,13 +36,13 @@ A visit starts with `status: ACTIVE` and transitions to `INVOICED` when closed. 
 
 A session represents **one continuous activity block** — e.g., "Mohamed playing PS from 14:00 to 17:00". It does not hold any pricing data itself. Pricing lives entirely in its components.
 
-| Field | Description |
-|---|---|
-| `startedAt` | When the activity started |
-| `endedAt` | When it ended (null while active) |
-| `durationMinutes` | Calculated on end |
-| `totalPrice` | Sum of all component `totalPrice` values |
-| `status` | `ACTIVE` → `ENDED` or `CANCELLED` |
+| Field             | Description                              |
+| ----------------- | ---------------------------------------- |
+| `startedAt`       | When the activity started                |
+| `endedAt`         | When it ended (null while active)        |
+| `durationMinutes` | Calculated on end                        |
+| `totalPrice`      | Sum of all component `totalPrice` values |
+| `status`          | `ACTIVE` → `ENDED` or `CANCELLED`        |
 
 ---
 
@@ -50,18 +50,18 @@ A session represents **one continuous activity block** — e.g., "Mohamed playin
 
 A session component is a **single resource contributing to a session**. One session can have many components. Each component is priced independently and has its own start/end time — enabling mid-session additions (e.g., a friend arriving and adding 2 controllers).
 
-| Field | Description |
-|---|---|
-| `resourceType` | `SPACE`, `DEVICE`, `UNIT`, or `EQUIPMENT` |
-| `resourceId` | The specific resource being used |
-| `priceType` | `PER_HOUR`, `PER_SESSION`, or `PER_GAME` |
-| `unitPrice` | Price per unit (snapshotted from resource or pricing rule at session start) |
-| `quantity` | How many of this resource used simultaneously (e.g., `2` for two controllers). Default `1`. Multiplies the price. |
-| `gamesCount` | Number of games played. Default `0`. **Only used when `priceType = PER_GAME`** — ignored for `PER_HOUR` and `PER_SESSION`. |
-| `startedAt` | When this component was added |
-| `endedAt` | When this component was removed or the session ended |
-| `durationMinutes` | Calculated from `startedAt` → `endedAt` |
-| `totalPrice` | Final price for this component |
+| Field             | Description                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `resourceType`    | `SPACE`, `DEVICE`, `UNIT`, or `EQUIPMENT`                                                                                  |
+| `resourceId`      | The specific resource being used                                                                                           |
+| `priceType`       | `PER_HOUR`, `PER_SESSION`, or `PER_GAME`                                                                                   |
+| `unitPrice`       | Price per unit (snapshotted from resource or pricing rule at session start)                                                |
+| `quantity`        | How many of this resource used simultaneously (e.g., `2` for two controllers). Default `1`. Multiplies the price.          |
+| `gamesCount`      | Number of games played. Default `0`. **Only used when `priceType = PER_GAME`** — ignored for `PER_HOUR` and `PER_SESSION`. |
+| `startedAt`       | When this component was added                                                                                              |
+| `endedAt`         | When this component was removed or the session ended                                                                       |
+| `durationMinutes` | Calculated from `startedAt` → `endedAt`                                                                                    |
+| `totalPrice`      | Final price for this component                                                                                             |
 
 ---
 
@@ -80,19 +80,19 @@ A `PricingRule` can override the resource's default price and type.
 
 ### PricingRule Modes
 
-| `pricingMode` | Behavior |
-|---|---|
-| `FIXED_PRICE` | Flat fee regardless of time — treated as `PER_SESSION` |
-| `PER_HOUR` | Price multiplied by duration in hours |
-| `TIME_RANGE` | Time-based; billed like `PER_HOUR`. (Its `minDurationMinutes`/`maxDurationMinutes` are validated on the rule but not yet applied at billing.) |
+| `pricingMode` | Behavior                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIXED_PRICE` | Flat fee regardless of time — treated as `PER_SESSION`                                                                                        |
+| `PER_HOUR`    | Price multiplied by duration in hours                                                                                                         |
+| `TIME_RANGE`  | Time-based; billed like `PER_HOUR`. (Its `minDurationMinutes`/`maxDurationMinutes` are validated on the rule but not yet applied at billing.) |
 
 ### PricingType
 
-| `pricingType` | Formula |
-|---|---|
-| `PER_HOUR` | `unitPrice × quantity × (durationMinutes / 60)` |
-| `PER_SESSION` | `unitPrice × quantity` (flat, no time factor) |
-| `PER_GAME` | `unitPrice × quantity × gamesCount` |
+| `pricingType` | Formula                                         |
+| ------------- | ----------------------------------------------- |
+| `PER_HOUR`    | `unitPrice × quantity × (durationMinutes / 60)` |
+| `PER_SESSION` | `unitPrice × quantity` (flat, no time factor)   |
+| `PER_GAME`    | `unitPrice × quantity × gamesCount`             |
 
 ---
 
@@ -116,56 +116,111 @@ The `unitPrice` is a **snapshot** — taken from the resource or pricing rule at
 
 ---
 
-## Player-Count (Mode) Pricing
+## Game Modes (SGL / DBL)
 
-A console/table can be billed differently by **player count** — e.g. Single (1v1) vs Double (2v2) — with each mode shown as its own timed line on the bill.
+A console/table is billed by **game mode** — e.g. Single (1v1) vs Double (2v2) — with each mode shown as its own timed line on the bill.
 
-You control the mode with two optional body fields, on **`POST /sessions/create/:branchId`** and **`PATCH /sessions/change-players/:sessionId`**:
-- `players` — the player count (e.g. `2`, `4`), stored on the device/unit segment.
-- `modeLabel` — the **text you want the customer to see** (e.g. `"SGL"`, `"DBL"`, or Arabic). Free text; applies to the device/unit segment only. If omitted, it falls back to a matched pricing-rule name, else `null`.
+**The device's rate never changes between modes.** The extra cost of a bigger mode is entirely the **controllers** it requires, and the backend adds and removes those automatically. `PricingRule` is **not** consulted on any game-mode path.
 
-The extra **cost** of more players is added by the frontend/staff as **equipment components** (e.g. adding controllers via `addComponent`), so the mix is fully dynamic — the label and the charge are independent.
+### The `GameMode` catalogue
 
-### Setup: player-banded pricing rules
+Modes are rows in the `GameMode` table, scoped per branch:
 
-Define one `PricingRule` per band on the device/unit, using `minPlayers`/`maxPlayers`:
+| Field                   | Description                                                             |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `code`                  | Machine key, uppercase, unique per branch: `SGL`, `DBL`                 |
+| `label` / `labelAr`     | What the customer sees: `"Single (1v1)"`                                |
+| `players`               | Snapshotted onto the DEVICE/UNIT segment                                |
+| `controllersRequired`   | How many controllers this mode adds                                     |
+| `controllerEquipmentId` | **Which** CONTROLLER row to draw from — required when the above is > 0  |
+| `deviceTypes`           | Empty = applies to every device. Otherwise restricts by `DeviceType`.   |
+| `sortOrder` / `isDefault` / `isActive` | Presentation and lifecycle                               |
 
-| name | minPlayers | maxPlayers | price | priority |
-|---|---|---|---|---|
-| `SGL` | 1 | 2 | 20 | 10 |
-| `DBL` | 3 | 4 | 30 | 10 |
+Example for a branch whose device bills 20/hr and controller 5/hr:
 
-- When a session is created/switched **with a player count**, `resolvePricingRule` matches only rules whose `[minPlayers, maxPlayers]` band contains it (a `null` bound is open-ended), then picks the highest `priority`.
-- A **generic** rule (both bounds `null`) matches any count — so give player-banded rules a higher `priority` so they win.
-- **No matching rule → base price fallback.** A resource's base `price` is a single scalar and **cannot** vary by player count, so tiered pricing *requires* per-band rules; the base price is only the last-resort flat fallback.
-- The matched rule's **name** is snapshotted onto the component as `modeLabel` (e.g. `"SGL"`/`"DBL"`), and the player count as `players`. Both appear on the component in `GET /visits/getById/:visitId` (and session views) so the customer sees the mode.
+| code  | players | controllersRequired | effective rate         |
+| ----- | ------- | ------------------- | ---------------------- |
+| `SGL` | 2       | 1                   | 20 + 1×5 = **25/hr**   |
+| `DBL` | 4       | 2                   | 20 + 2×5 = **30/hr**   |
 
-### Starting a session with a mode
+Manage them via `POST/GET/PATCH/DELETE /api/v1/game-modes/...` (permissions `CREATE|VIEW|UPDATE|DELETE-GAME-MODES`; STAFF get `VIEW`).
 
-`POST /sessions/create/:branchId` accepts optional `players` + `modeLabel`:
-```json
-{ "visitId": "...", "deviceId": "...", "players": 2, "modeLabel": "SGL" }
+### Listing modes with prices — what the switcher renders
+
 ```
-→ the DEVICE/UNIT component is stamped with `players: 2` and `modeLabel: "SGL"` (priced from the matching pricing-rule band if one exists, else the resource's base price). Omit both → `players`/`modeLabel` null, base pricing as before.
+GET /api/v1/game-modes/pricing/:branchId?deviceId=<id>
+                                        ?unitId=<id>
+                                        ?sessionId=<id>[&resourceId=<id>]
+```
+
+Exactly one of the three. Passing `sessionId` also marks the current mode and computes availability as a *delta* (the controllers this session already holds are released back before the new ones are reserved, so only the difference must be free).
+
+```jsonc
+{
+  "code": "DBL", "label": "Double (2v2)", "players": 4, "controllersRequired": 2,
+  "isCurrent": false,
+  "pricing": {
+    "lines": [
+      { "kind": "DEVICE",    "name": "PS5 #3",    "unitPrice": 20, "quantity": 1, "amount": 20 },
+      { "kind": "EQUIPMENT", "name": "DualSense", "unitPrice": 5,  "quantity": 2, "amount": 10 }
+    ],
+    "hourlyTotal": 30, "fixedTotal": 0, "perGameTotal": 0,
+    "priceLabel": "30/hr"
+  },
+  "availability": {
+    "selectable": true, "reason": null,
+    "controllersRequired": 2, "controllersHeld": 1, "controllersNeeded": 1, "controllersFree": 3
+  }
+}
+```
+
+`reason` is `null | ALREADY_ACTIVE | NOT_ENOUGH_CONTROLLERS | MODE_MISCONFIGURED | DEVICE_TYPE_MISMATCH`. This endpoint is **not cached** — availability is live inventory.
+
+### Starting a session in a mode
+
+`POST /sessions/create/:branchId` accepts `gameModeId` or `modeCode`:
+
+```json
+{ "visitId": "...", "deviceId": "...", "modeCode": "SGL" }
+```
+
+→ the DEVICE component is stamped with `players: 2`, `modeLabel: "Single (1v1)"`, `gameModeId`, and an **auto-managed** EQUIPMENT component for 1 controller is added alongside it. The legacy `players` + `modeLabel` fields still work and still consult `PricingRule`.
 
 ### Switching mode mid-session
 
-`PATCH /sessions/change-players/:sessionId`, body `{ players, modeLabel?, resourceId? }` (gated by `UPDATE-SESSIONS` + an open shift; `modeLabel` = your own label for the new segment; `resourceId` only needed if the session has more than one active device/unit).
-
-It **segments** the device's play: it closes the current segment at **the current server time (`now`)** (billing it over its own window) and opens a fresh segment at the new count/label starting the same instant — zero gap. Note: the switch time is always `now` — there is no way to backdate it. Crucially, the physical device is **not released** during the swap (it stays `isBusy`), so no one else can book it mid-switch and controllers/equipment keep running. At `endSession`, each segment is priced over its own `startedAt → endedAt` window and summed.
-
-**Worked example** — SGL @ 20/h, DBL @ 30/h, private room SPACE @ 60/h:
 ```
-Start 14:00 players=2 (SGL). At 15:00 → change-players 4 (DBL). End 17:00.
-  SPACE  — 14:00→17:00 — 180 min — 180.00
-  DEVICE — SGL — 14:00→15:00 —  60 min —  20.00
-  DEVICE — DBL — 15:00→17:00 — 120 min —  60.00
-  session total = 260.00
+PATCH /api/v1/sessions/change-mode/:sessionId
+{ "gameModeId": "...", "switchedAt": "2026-08-01T15:00:00Z" }
 ```
 
-> Note: "player count" here can be whatever the café means by a mode — SGL (1v1) may map to 2 players, DBL (2v2) to 4 — the label the customer sees is the matched rule's **name** when a player-banded rule is used, otherwise just the raw number.
+(or `modeCode`; gated by `UPDATE-SESSIONS` + an open shift. `resourceId` only needed when the session has more than one active device/unit. `switchedAt` is optional and defaults to now — it must fall inside the current segment's window and cannot be in the future.)
 
-**Adding controllers for extra players:** controllers are **not** added automatically. When a session becomes multiplayer, the frontend/staff add the controllers as EQUIPMENT components via `addComponent` (with the desired `quantity`), each billed over its own window at the equipment's rate. This keeps the equipment mix fully dynamic and staff-controlled.
+`PATCH /sessions/change-players/:sessionId` remains as a **back-compat alias** for the same handler. A body carrying only `{ players, modeLabel? }` still segments and relabels the device without touching controllers — but note it no longer consults `PricingRule`, so the new segment is priced from the resource's base rate rather than a player band.
+
+What happens, all in one transaction:
+
+1. **Device** — when priced `PER_HOUR`, the open segment is closed at `switchedAt` and billed over its own window, and a fresh segment opens at the same instant. For `PER_SESSION`/`PER_GAME` devices it is **relabelled in place** instead, because segmenting would charge a flat fee twice.
+2. **Controllers** — the session's auto-managed controllers are closed and a new set opened at the new quantity. Staff-added equipment (a headset, an ad-hoc extra controller) is **never** touched.
+3. The physical device is **not released** during the swap, so nobody can book it mid-switch.
+
+If the branch doesn't have enough free controllers the whole switch fails with **`409` / `typeError: "CONTROLLERS_UNAVAILABLE"`** and the session stays entirely in its old mode — never half-switched. An OWNER/ADMIN/DEVELOPER may pass `allowOverbook: true` to bypass the capacity cap for untracked spare stock.
+
+**Worked example** — device 20/hr, controller 5/hr, SGL = 1 controller, DBL = 2:
+
+```
+Start 14:00 in SGL. At 15:00 → change-mode DBL. End 17:00.
+  DEVICE    — SGL — 14:00→15:00 —  60 min —  20.00
+  EQUIPMENT — ×1  — 14:00→15:00 —  60 min —   5.00
+  DEVICE    — DBL — 15:00→17:00 — 120 min —  40.00
+  EQUIPMENT — ×2  — 15:00→17:00 — 120 min —  20.00
+  session total = 85.00   ( = 25/hr × 1h  +  30/hr × 2h )
+```
+
+That last line is the invariant the feature guarantees and `npm run test:game-mode` asserts: **the price the switcher quotes is the price the bill charges.**
+
+### Seeding
+
+`npm run seed:full` creates SGL/DBL for the seeded branch. For branches that already exist, run `node --env-file=.env scripts/seedGameModes.js` (idempotent; add a branchId to target one).
 
 ---
 
@@ -277,10 +332,10 @@ order.finalPrice = totalPrice → apply customerDiscount → apply manualDiscoun
 
 ### Two Discount Layers
 
-| Layer | Source | Applied at |
-|---|---|---|
+| Layer             | Source                                                   | Applied at                          |
+| ----------------- | -------------------------------------------------------- | ----------------------------------- |
 | Customer discount | `Customer.discountType/Amount` (with date/time validity) | Invoice (visit) or Order (takeaway) |
-| Manual discount | Passed by staff at checkout | Invoice (visit) or Order (takeaway) |
+| Manual discount   | Passed by staff at checkout                              | Invoice (visit) or Order (takeaway) |
 
 ### Application Order
 
@@ -293,10 +348,10 @@ step 2: finalAmount   = applyDiscount(afterCustomer, manualDiscount.type, manual
 
 ### Discount Types
 
-| `discountType` | Formula |
-|---|---|
-| `FLAT` | `price - amount` (minimum 0) |
-| `PERCENT` | `price × (1 - amount / 100)` |
+| `discountType` | Formula                      |
+| -------------- | ---------------------------- |
+| `FLAT`         | `price - amount` (minimum 0) |
+| `PERCENT`      | `price × (1 - amount / 100)` |
 
 ### Customer Discount Validity
 
@@ -315,15 +370,15 @@ A customer discount is only active when ALL of the following are true:
 
 ### Structure
 
-| Field | Description |
-|---|---|
-| `totalAmount` | Raw total before any discounts (sessions + orders) |
-| `customerDiscountType` | Type of customer discount applied |
-| `customerDiscountAmount` | Amount of customer discount applied |
-| `discountType` | Type of manual discount applied by staff |
-| `discountAmount` | Amount of manual discount applied by staff |
-| `finalAmount` | Amount the customer actually pays |
-| `status` | `UNPAID` → `PAID` |
+| Field                    | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `totalAmount`            | Raw total before any discounts (sessions + orders) |
+| `customerDiscountType`   | Type of customer discount applied                  |
+| `customerDiscountAmount` | Amount of customer discount applied                |
+| `discountType`           | Type of manual discount applied by staff           |
+| `discountAmount`         | Amount of manual discount applied by staff         |
+| `finalAmount`            | Amount the customer actually pays                  |
+| `status`                 | `UNPAID` → `PAID`                                  |
 
 ### Visit Invoice Flow
 
@@ -359,39 +414,39 @@ POST /api/v1/invoices/createOrder/:orderId
 
 ### Sessions
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/v1/sessions/create/:branchId` | Create session with initial components |
-| `GET` | `/api/v1/sessions/getAll/:branchId` | List all sessions for a branch |
-| `GET` | `/api/v1/sessions/getById/:sessionId` | Get a single session with components |
-| `GET` | `/api/v1/sessions/visit/:branchId/:visitId` | Get all sessions for a visit |
-| `PATCH` | `/api/v1/sessions/end/:sessionId` | End session, calculate all component prices |
-| `PATCH` | `/api/v1/sessions/cancel/:sessionId` | Cancel session, zero all prices |
-| `PATCH` | `/api/v1/sessions/update/:sessionId` | Update bookingId, currency, startedAt |
-| `DELETE` | `/api/v1/sessions/delete/:sessionId` | Soft delete session |
+| Method   | Endpoint                                    | Description                                 |
+| -------- | ------------------------------------------- | ------------------------------------------- |
+| `POST`   | `/api/v1/sessions/create/:branchId`         | Create session with initial components      |
+| `GET`    | `/api/v1/sessions/getAll/:branchId`         | List all sessions for a branch              |
+| `GET`    | `/api/v1/sessions/getById/:sessionId`       | Get a single session with components        |
+| `GET`    | `/api/v1/sessions/visit/:branchId/:visitId` | Get all sessions for a visit                |
+| `PATCH`  | `/api/v1/sessions/end/:sessionId`           | End session, calculate all component prices |
+| `PATCH`  | `/api/v1/sessions/cancel/:sessionId`        | Cancel session, zero all prices             |
+| `PATCH`  | `/api/v1/sessions/update/:sessionId`        | Update bookingId, currency, startedAt       |
+| `DELETE` | `/api/v1/sessions/delete/:sessionId`        | Soft delete session                         |
 
 ### Session Components
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/v1/session-components/:branchId/:sessionId` | Add a component to an active session |
-| `GET` | `/api/v1/session-components/:branchId/:sessionId` | List all components for a session |
-| `DELETE` | `/api/v1/session-components/:branchId/remove/:componentId` | End a component early |
+| Method  | Endpoint                                                | Description                          |
+| ------- | ------------------------------------------------------- | ------------------------------------ |
+| `POST`  | `/api/v1/session-components/:branchId/:sessionId`       | Add a component to an active session |
+| `GET`   | `/api/v1/session-components/:branchId/:sessionId`       | List all components for a session    |
+| `PATCH` | `/api/v1/session-components/:branchId/end/:componentId` | End a component early                |
 
 ### Visits
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/v1/visits/start` | Start a visit |
-| `GET` | `/api/v1/visits/getAllByBranchId/:branchId` | List visits for a branch |
-| `PATCH` | `/api/v1/visits/close/:visitId` | Close visit, create invoice with discounts |
+| Method  | Endpoint                                    | Description                                |
+| ------- | ------------------------------------------- | ------------------------------------------ |
+| `POST`  | `/api/v1/visits/start`                      | Start a visit                              |
+| `GET`   | `/api/v1/visits/getAllByBranchId/:branchId` | List visits for a branch                   |
+| `PATCH` | `/api/v1/visits/close/:visitId`             | Close visit, create invoice with discounts |
 
 ### Request body for `closeVisit`
 
 ```json
 {
-  "discountType": "FLAT",      // optional: "FLAT" or "PERCENT"
-  "discountAmount": 50         // optional: manual discount by staff
+  "discountType": "FLAT", // optional: "FLAT" or "PERCENT"
+  "discountAmount": 50 // optional: manual discount by staff
 }
 ```
 
@@ -441,13 +496,12 @@ Creates the session with **SPACE only** — never auto-adds the other devices/un
 {
   "visitId": "uuid",
   "startedAt": "2024-01-01T09:00:00Z",
-  "components": [
-    { "resourceType": "SPACE", "resourceId": "uuid" }
-  ]
+  "components": [{ "resourceType": "SPACE", "resourceId": "uuid" }]
 }
 ```
 
 Rules:
+
 - Provide exactly one of: `deviceId`, `unitId`, `spaceId`, or a non-empty `components[]` — never more than one
 - Equipment is always added via `addComponent` to an existing session, never as a session starter
 
@@ -458,8 +512,8 @@ Rules:
   "resourceType": "EQUIPMENT",
   "resourceId": "uuid",
   "quantity": 2,
-  "gamesCount": 0,               // optional — only set for PER_GAME resources, ignored otherwise
-  "startedAt": "2024-01-01T15:00:00Z"  // optional, defaults to now
+  "gamesCount": 0, // optional — only set for PER_GAME resources, ignored otherwise
+  "startedAt": "2024-01-01T15:00:00Z" // optional, defaults to now
 }
 ```
 
@@ -470,13 +524,13 @@ Rules:
 When staff creates a session using `deviceId` or `unitId` (smart mode), the system always adds a `SPACE` component alongside the resource if it belongs to one — every space type is chargeable.
 
 | Space Type | Auto-add to device/unit session? |
-|---|---|
-| `PUBLIC` | Yes |
-| `DESK` | Yes |
-| `PRIVATE` | Yes |
-| `VIP` | Yes |
-| `MEETING` | Yes |
-| `OTHER` | Yes |
+| ---------- | -------------------------------- |
+| `PUBLIC`   | Yes                              |
+| `DESK`     | Yes                              |
+| `PRIVATE`  | Yes                              |
+| `VIP`      | Yes                              |
+| `MEETING`  | Yes                              |
+| `OTHER`    | Yes                              |
 
 If the device or unit has no `spaceId` (not assigned to any room), only that resource's component is added — there's no space to charge.
 
@@ -495,7 +549,7 @@ When a component is added (session created or `addComponent` called), the resour
 
 When a component ends (session ended/cancelled or `removeComponent` called), availability is restored:
 
-- **SPACE**: `availableNumber` incremented (capped at `capacity`); `isBusy` recalculated
+- **SPACE**: `availableNumber` incremented (capped at `bookingCapacity`); `isBusy` recalculated
 - **DEVICE / UNIT / EQUIPMENT**: `isBusy = false`
 
 ---

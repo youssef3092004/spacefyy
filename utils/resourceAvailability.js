@@ -144,26 +144,32 @@ export const mapPricingRuleToPriceType = (pricingRule) => {
 
 export const reserveResourceAvailability = async (tx, { resourceType, resourceId, branchId, quantity }) => {
   if (resourceType === "SPACE") {
-    const updated = await tx.space.updateMany({
-      where: { id: resourceId, branchId, isActive: true, availableNumber: { gt: 0 } },
-      data: { availableNumber: { decrement: 1 } },
-    });
-    if (updated.count === 0) throw new AppError("Space is not available", 400);
-
-    const space = await tx.space.findFirst({
-      where: { id: resourceId, branchId },
-      select: { availableNumber: true },
-    });
-    await tx.space.update({
-      where: { id: resourceId },
-      data: { isBusy: Number(space?.availableNumber || 0) <= 0 },
-    });
+    // Single statement so the decrement and the derived isBusy cannot be split
+    // by a concurrent writer. Soft-deleted spaces are excluded — they used to
+    // stay bookable while being invisible in every listing.
+    const updated = await tx.$executeRaw`
+      UPDATE "Space"
+      SET "availableNumber" = "availableNumber" - 1,
+          "isBusy" = ("availableNumber" - 1) <= 0
+      WHERE "id" = ${resourceId}
+        AND "branchId" = ${branchId}
+        AND "isActive" = true
+        AND "isDeleted" = false
+        AND "availableNumber" > 0
+    `;
+    if (updated === 0) throw new AppError("Space is not available", 400);
     return;
   }
 
   if (resourceType === "DEVICE") {
     const updated = await tx.device.updateMany({
-      where: { id: resourceId, branchId, isActive: true, isBusy: false },
+      where: {
+        id: resourceId,
+        branchId,
+        isActive: true,
+        isDeleted: false,
+        isBusy: false,
+      },
       data: { isBusy: true },
     });
     if (updated.count === 0) throw new AppError("Device is not available", 400);
@@ -180,10 +186,18 @@ export const reserveResourceAvailability = async (tx, { resourceType, resourceId
   }
 
   if (resourceType === "EQUIPMENT") {
-    const equipment = await tx.equipment.findFirst({
-      where: { id: resourceId, branchId, isActive: true, isDeleted: false },
-      select: { quantity: true },
-    });
+    // Lock the equipment row for the rest of the transaction. Without it, two
+    // concurrent reservations both read inUse before either inserts its
+    // component row, and both pass the capacity check.
+    const locked = await tx.$queryRaw`
+      SELECT "quantity" FROM "Equipment"
+      WHERE "id" = ${resourceId}
+        AND "branchId" = ${branchId}
+        AND "isActive" = true
+        AND "isDeleted" = false
+      FOR UPDATE
+    `;
+    const equipment = locked?.[0];
     if (!equipment) throw new AppError("Equipment not found for this branch", 404);
 
     const inUseAgg = await tx.sessionComponent.aggregate({
@@ -211,17 +225,17 @@ export const reserveResourceAvailability = async (tx, { resourceType, resourceId
 
 export const releaseResourceAvailability = async (tx, { resourceType, resourceId, branchId }) => {
   if (resourceType === "SPACE") {
-    const space = await tx.space.findFirst({
-      where: { id: resourceId, branchId },
-      select: { availableNumber: true, capacity: true },
-    });
-    if (!space) return;
-
-    const next = Math.min(space.capacity, space.availableNumber + 1);
-    await tx.space.update({
-      where: { id: resourceId },
-      data: { availableNumber: next, isBusy: next <= 0 },
-    });
+    // Atomic increment clamped to capacity. The previous read-compute-write
+    // lost updates: two simultaneous releases both read n and both wrote n+1,
+    // permanently leaking a slot that nothing could recover.
+    await tx.$executeRaw`
+      UPDATE "Space"
+      SET "availableNumber" = LEAST("bookingCapacity", "availableNumber" + 1),
+          "isBusy" = LEAST("bookingCapacity", "availableNumber" + 1) <= 0
+      WHERE "id" = ${resourceId}
+        AND "branchId" = ${branchId}
+        AND "availableNumber" < "bookingCapacity"
+    `;
     return;
   }
 
@@ -231,8 +245,11 @@ export const releaseResourceAvailability = async (tx, { resourceType, resourceId
   }
 
   if (resourceType === "UNIT") {
+    // No isDeleted filter: a resource soft-deleted while it was busy still has
+    // to be released, or isBusy stays true forever and the reconcile script
+    // (which skips deleted rows) can never repair it.
     await tx.unit.updateMany({
-      where: { id: resourceId, branchId, isDeleted: false },
+      where: { id: resourceId, branchId },
       data: { isBusy: false },
     });
     return;
@@ -251,8 +268,27 @@ export const releaseResourceAvailability = async (tx, { resourceType, resourceId
     });
 
     await tx.equipment.updateMany({
-      where: { id: resourceId, branchId, isDeleted: false },
+      where: { id: resourceId, branchId },
       data: { isBusy: inUse >= (equipment?.quantity ?? 0) },
     });
+  }
+};
+
+/**
+ * Throws when a resource still has open session components.
+ *
+ * Deleting a busy resource used to leave it isBusy forever: no delete handler
+ * ended its live sessions, and the later release was a silent no-op.
+ */
+export const assertResourceNotInUse = async (client, { resourceType, resourceId }) => {
+  const openComponents = await client.sessionComponent.count({
+    where: { resourceType, resourceId, endedAt: null },
+  });
+
+  if (openComponents > 0) {
+    throw new AppError(
+      `Cannot delete: this ${resourceType.toLowerCase()} is in use by ${openComponents} active session component(s). End them first.`,
+      409,
+    );
   }
 };

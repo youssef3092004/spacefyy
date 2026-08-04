@@ -95,12 +95,29 @@ const enrichItems = async (items) => {
     }
     enriched.push({
       productId: product.id,
+      productName: product.name,
       quantity,
       unitPrice: Number(product.price).toFixed(2),
       totalPrice: (Number(product.price) * quantity).toFixed(2),
     });
   }
   return enriched;
+};
+
+// The stock read in enrichItems is only a fast pre-check — two concurrent
+// orders can both pass it. This is the authoritative reservation: the `gte`
+// predicate makes the decrement fail rather than go negative.
+const reserveProductStock = async (tx, { productId, productName, quantity }) => {
+  const { count } = await tx.product.updateMany({
+    where: { id: productId, stock: { gte: quantity } },
+    data: { stock: { decrement: quantity } },
+  });
+  if (count === 0) {
+    throw new AppError(
+      `Insufficient stock for "${productName}". Requested: ${quantity}`,
+      409,
+    );
+  }
 };
 
 const formatOrderItem = (item) => ({
@@ -354,87 +371,151 @@ export const addOrderItems = async (req, res, next) => {
 
     const enriched = await enrichItems(parsed);
 
-    const order = await prisma.$transaction(async (tx) => {
-      let orderId;
+    const runOrderTransaction = () =>
+      prisma.$transaction(async (tx) => {
+        // Re-read inside the transaction: the pre-check above is only a fast
+        // 409. Two concurrent "add items" calls both saw no order and would
+        // otherwise create two open orders for one visit — closeVisitCore sums
+        // every order on the visit, so the customer would be billed twice.
+        const current = resolvedVisitId
+          ? await tx.order.findFirst({
+              where: { visitId: resolvedVisitId },
+              select: {
+                id: true,
+                status: true,
+                discountType: true,
+                discountAmount: true,
+                customerDiscountType: true,
+                customerDiscountAmount: true,
+              },
+            })
+          : null;
 
-      if (!existing) {
-        orderId = randomUUID();
-        const branchOrderCount = await tx.order.count({
-          where: { branchId: resolvedBranchId },
-        });
-        await tx.order.create({
-          data: {
-            id: orderId,
-            number: branchOrderCount + 1,
-            ...(resolvedVisitId ? { visitId: resolvedVisitId } : {}),
-            branchId: resolvedBranchId,
-            ...(resolvedCustomerId ? { customerId: resolvedCustomerId } : {}),
-            status: "OPEN",
-            discountType: orderDiscount.type,
-            discountAmount: orderDiscount.amount,
-            customerDiscountType: customerDiscount.type,
-            customerDiscountAmount: customerDiscount.amount,
-            totalPrice: 0,
-            finalPrice: 0,
-          },
-        });
-      } else {
-        orderId = existing.id;
-      }
+        if (FINAL_ORDER_STATUSES.has(current?.status)) {
+          throw new AppError(
+            "This order is already finalized. No more items can be added.",
+            409,
+          );
+        }
 
-      for (const item of enriched) {
-        await tx.orderItem.create({
-          data: {
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
-            order: { connect: { id: orderId } },
-            product: { connect: { id: item.productId } },
-          },
-        });
-      }
+        let orderId;
 
-      for (const item of enriched) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.quantity } },
-        });
-      }
+        if (!current) {
+          orderId = randomUUID();
+          // number is unique per branch at the DB level; a collision surfaces
+          // as P2002 and the whole transaction is retried.
+          const lastOrder = await tx.order.findFirst({
+            where: { branchId: resolvedBranchId },
+            orderBy: { number: "desc" },
+            select: { number: true },
+          });
+          await tx.order.create({
+            data: {
+              id: orderId,
+              number: (lastOrder?.number ?? 0) + 1,
+              ...(resolvedVisitId ? { visitId: resolvedVisitId } : {}),
+              branchId: resolvedBranchId,
+              ...(resolvedCustomerId ? { customerId: resolvedCustomerId } : {}),
+              status: "OPEN",
+              discountType: orderDiscount.type,
+              discountAmount: orderDiscount.amount,
+              customerDiscountType: customerDiscount.type,
+              customerDiscountAmount: customerDiscount.amount,
+              totalPrice: 0,
+              finalPrice: 0,
+            },
+          });
 
-      const allItems = await tx.orderItem.findMany({
-        where: { orderId },
-        select: { totalPrice: true },
+          // A takeaway customer counts as a customer of this branch. Only visits
+          // created this link before, so takeaway-only regulars were missing
+          // from every branch customer count.
+          if (resolvedCustomerId) {
+            await tx.customerBranch.upsert({
+              where: {
+                customerId_branchId: {
+                  customerId: resolvedCustomerId,
+                  branchId: resolvedBranchId,
+                },
+              },
+              create: {
+                customerId: resolvedCustomerId,
+                branchId: resolvedBranchId,
+              },
+              update: {},
+            });
+          }
+        } else {
+          orderId = current.id;
+        }
+
+        for (const item of enriched) {
+          await reserveProductStock(tx, item);
+          await tx.orderItem.create({
+            data: {
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              totalPrice: item.totalPrice,
+              order: { connect: { id: orderId } },
+              product: { connect: { id: item.productId } },
+            },
+          });
+        }
+
+        const allItems = await tx.orderItem.findMany({
+          where: { orderId },
+          select: { totalPrice: true },
+        });
+        const newTotal = sumItems(allItems);
+        const discountSnapshot = current ?? {
+          customerDiscountType: customerDiscount.type,
+          customerDiscountAmount: customerDiscount.amount,
+          discountType: orderDiscount.type,
+          discountAmount: orderDiscount.amount,
+        };
+        const newFinal = applyBothDiscounts(newTotal, discountSnapshot);
+
+        await tx.order.update({
+          where: { id: orderId },
+          data: { totalPrice: newTotal, finalPrice: newFinal },
+        });
+
+        const saved = await tx.order.findUnique({
+          where: { id: orderId },
+          include: ORDER_INCLUDE,
+        });
+        return { order: saved, created: !current };
       });
-      const newTotal = sumItems(allItems);
-      const discountSnapshot = existing
-        ? existing
-        : {
-            customerDiscountType: customerDiscount.type,
-            customerDiscountAmount: customerDiscount.amount,
-            discountType: orderDiscount.type,
-            discountAmount: orderDiscount.amount,
-          };
-      const newFinal = applyBothDiscounts(newTotal, discountSnapshot);
 
-      await tx.order.update({
-        where: { id: orderId },
-        data: { totalPrice: newTotal, finalPrice: newFinal },
-      });
+    // P2002 = the visitId or (branchId, number) unique index rejected a
+    // concurrent create. Retrying picks up the winner's order and appends to
+    // it, or re-derives the next free number. Bounded, because a busy branch
+    // can lose the number race more than once and a raw Prisma error escaping
+    // here would surface as a 500.
+    const MAX_ORDER_ATTEMPTS = 4;
+    let result;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        result = await runOrderTransaction();
+        break;
+      } catch (error) {
+        if (error?.code !== "P2002") throw error;
+        if (attempt >= MAX_ORDER_ATTEMPTS) {
+          throw new AppError(
+            "Could not create the order because of concurrent activity on this branch. Please retry.",
+            409,
+          );
+        }
+      }
+    }
 
-      return tx.order.findUnique({
-        where: { id: orderId },
-        include: ORDER_INCLUDE,
-      });
-    });
-
-    res.status(!existing ? 201 : 200).json({
+    res.status(result.created ? 201 : 200).json({
       success: true,
-      message: !existing
+      message: result.created
         ? isTakeaway
           ? "Takeaway order created"
           : "Order created"
         : "Items added to order",
-      data: formatOrder(order),
+      data: formatOrder(result.order),
     });
   } catch (error) {
     next(error);
@@ -476,6 +557,7 @@ export const updateItemQuantity = async (req, res, next) => {
         productId: true,
         quantity: true,
         unitPrice: true,
+        product: { select: { name: true } },
         order: {
           select: {
             id: true,
@@ -520,9 +602,10 @@ export const updateItemQuantity = async (req, res, next) => {
       });
 
       if (diff > 0) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: diff } },
+        await reserveProductStock(tx, {
+          productId: item.productId,
+          productName: item.product?.name ?? "product",
+          quantity: diff,
         });
       } else if (diff < 0) {
         await tx.product.update({

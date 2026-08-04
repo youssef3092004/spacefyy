@@ -2,10 +2,14 @@ import cron from "node-cron";
 import process from "process";
 import { prisma } from "../configs/db.js";
 import { resolveFallbackPlanId } from "./subscription.js";
+import { withCronLock } from "./cronLock.js";
 
 const GRACE_DAYS = parseInt(process.env.SUBSCRIPTION_GRACE_DAYS) || 3;
 
-export const runSubscriptionExpiryCheck = async () => {
+export const runSubscriptionExpiryCheck = async () =>
+  withCronLock("SubscriptionCron", runSubscriptionExpiryCheckUnlocked);
+
+const runSubscriptionExpiryCheckUnlocked = async () => {
   const now = new Date();
 
   const lapsedSubscriptions = await prisma.subscription.findMany({
@@ -21,13 +25,31 @@ export const runSubscriptionExpiryCheck = async () => {
   let expired = 0;
   const failedIds = [];
 
+  // Resolved once per run, not once per subscription — this is a constant for
+  // the whole sweep and was being re-queried inside both loops.
+  let fallbackPlanId = null;
+  const getFallbackPlanId = async () => {
+    if (!fallbackPlanId) fallbackPlanId = await resolveFallbackPlanId();
+    return fallbackPlanId;
+  };
+
   for (const subscription of lapsedSubscriptions) {
     try {
       if (subscription.cancelAtPeriodEnd) {
-        await prisma.subscription.update({
-          where: { id: subscription.id },
-          data: { status: "CANCELLED", cancelledAt: now },
-        });
+        // Reset the plan alongside the cancellation. A CANCELLED row is not in
+        // ACTIVE_STATUSES, so the PAST_DUE → EXPIRED sweep below never sees it
+        // again — without this the business keeps its paid limits forever.
+        const planId = await getFallbackPlanId();
+        await prisma.$transaction([
+          prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { status: "CANCELLED", cancelledAt: now },
+          }),
+          prisma.business.update({
+            where: { id: subscription.businessId },
+            data: { planId },
+          }),
+        ]);
         cancelled += 1;
       } else if (subscription.status !== "PAST_DUE") {
         await prisma.subscription.update({
@@ -62,7 +84,7 @@ export const runSubscriptionExpiryCheck = async () => {
 
   for (const subscription of overdueSubscriptions) {
     try {
-      const fallbackPlanId = await resolveFallbackPlanId();
+      const planId = await getFallbackPlanId();
       await prisma.$transaction([
         prisma.subscription.update({
           where: { id: subscription.id },
@@ -70,7 +92,7 @@ export const runSubscriptionExpiryCheck = async () => {
         }),
         prisma.business.update({
           where: { id: subscription.businessId },
-          data: { planId: fallbackPlanId },
+          data: { planId },
         }),
       ]);
       expired += 1;

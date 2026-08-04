@@ -324,18 +324,40 @@ export const recordStorageSnapshot = async (businessId) => {
       throw new AppError("Storage usage record not found", 404);
     }
 
-    // Create history record
-    await prisma.storageUsageHistory.create({
-      data: {
+    // One snapshot per business per UTC day. A plain create meant every extra
+    // app instance (and every re-run) appended a duplicate row, which showed up
+    // as spikes in the history charts.
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+
+    const snapshotValues = {
+      branches: storageUsage.currentBranches,
+      spaces: storageUsage.currentSpaces,
+      devices: storageUsage.currentDevices,
+      units: storageUsage.currentUnits,
+      equipment: storageUsage.currentEquipment,
+      staff: storageUsage.currentStaff,
+      users: storageUsage.currentUsers,
+    };
+
+    const todaySnapshot = await prisma.storageUsageHistory.findFirst({
+      where: {
         storageUsageId: storageUsage.id,
-        branches: storageUsage.currentBranches,
-        spaces: storageUsage.currentSpaces,
-        devices: storageUsage.currentDevices,
-        units: storageUsage.currentUnits,
-        equipment: storageUsage.currentEquipment,
-        staff: storageUsage.currentStaff,
-        users: storageUsage.currentUsers,
+        recordedAt: { gte: dayStart },
       },
+      select: { id: true },
+    });
+
+    if (todaySnapshot) {
+      await prisma.storageUsageHistory.update({
+        where: { id: todaySnapshot.id },
+        data: { ...snapshotValues, recordedAt: new Date() },
+      });
+      return;
+    }
+
+    await prisma.storageUsageHistory.create({
+      data: { storageUsageId: storageUsage.id, ...snapshotValues },
     });
   } catch (error) {
     console.error("Error recording storage snapshot:", error);
@@ -385,9 +407,11 @@ export const checkResourceLimit = async (businessId, resourceType) => {
         current: storageUsage.currentEquipment,
         max: plan.maxEquipment,
       },
+      // maxStaff, not maxUsers — checkResourceLimit enforces maxStaff, so
+      // reading maxUsers here reported free slots that creation then refused.
       staff: {
         current: storageUsage.currentStaff,
-        max: plan.maxUsers,
+        max: plan.maxStaff,
       },
       users: {
         current: storageUsage.currentUsers,
@@ -487,10 +511,10 @@ export const getStorageUsageSummary = async (businessId) => {
         },
         staff: {
           current: storageUsage.currentStaff,
-          max: plan.maxUsers,
+          max: plan.maxStaff,
           usagePercent: calculatePercentage(
             storageUsage.currentStaff,
-            plan.maxUsers,
+            plan.maxStaff,
           ),
         },
         users: {

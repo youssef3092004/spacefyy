@@ -9,10 +9,20 @@ import {
   isValidName,
   isValidEmail,
   isValidPhone,
-  isValidPassword,
 } from "../utils/validation.js";
 import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
-import bcrypt from "bcrypt";
+import {
+  checkBranchAccess,
+  getAccessibleBranchIds,
+} from "../utils/checkBranchAccess.js";
+
+// null means "no restriction" (DEVELOPER only); every other role is limited to
+// the branches they can actually reach.
+const getAccessibleBranchIdsOrNull = async (req) => {
+  const roleName = req.user?.roleName;
+  if (roleName === "DEVELOPER") return null;
+  return getAccessibleBranchIds(req.user?.id || req.user?.userId, roleName);
+};
 
 const invalidateStaffProfileCache = async (
   userId,
@@ -157,8 +167,14 @@ export const getAllStaffProfiles = async (req, res, next) => {
   try {
     const { page, limit, skip, sort, order } = pagination(req);
 
+    // Unscoped, this listed salaries and government-ID images for every
+    // employee of every tenant. DEVELOPER (null) is the only cross-tenant role.
+    const branchIds = await getAccessibleBranchIdsOrNull(req);
+    const where = branchIds === null ? {} : { branchId: { in: branchIds } };
+
     const [staffProfiles, total] = await prisma.$transaction([
       prisma.staffProfile.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { [sort]: order },
@@ -182,10 +198,11 @@ export const getAllStaffProfiles = async (req, res, next) => {
               },
             },
           },
-          nationalId: true,
+          // nationalId (number + front/back ID card scans) is deliberately not
+          // in the list shape — fetch a single profile by id if it's needed.
         },
       }),
-      prisma.staffProfile.count(),
+      prisma.staffProfile.count({ where }),
     ]);
 
     const totalPages = Math.ceil(total / limit);
@@ -296,7 +313,10 @@ export const getStaffProfileByUserId = async (req, res, next) => {
 
 export const getStaffProfilesCount = async (req, res, next) => {
   try {
-    const count = await prisma.staffProfile.count();
+    const branchIds = await getAccessibleBranchIdsOrNull(req);
+    const count = await prisma.staffProfile.count({
+      where: branchIds === null ? {} : { branchId: { in: branchIds } },
+    });
     if (count === 0) {
       return next(new AppError("No staff profiles found", 404));
     }
@@ -354,6 +374,19 @@ export const updateStaffProfileById = async (req, res, next) => {
     }
     if (!parseFloat(baseSalary) || parseFloat(baseSalary) < 0) {
       return next(new AppError("baseSalary must be a positive number", 400));
+    }
+
+    // checkOwnership validated the PRE-update branch; the target branch must be
+    // reachable too, or this becomes a way to move a profile into another tenant.
+    const canUseBranch = await checkBranchAccess(
+      req.user?.id || req.user?.userId,
+      req.user?.roleName,
+      branchId,
+    );
+    if (!canUseBranch) {
+      return next(
+        new AppError("You do not have access to the target branch", 403),
+      );
     }
 
     const updatedStaffProfile = await prisma.staffProfile.update({
@@ -512,6 +545,20 @@ export const updateStaffProfileByUserId = async (req, res, next) => {
     if (!branch) {
       return next(new AppError("branch not found", 404));
     }
+
+    // checkOwnership validated the PRE-update branch; the target branch must be
+    // reachable too, or this becomes a way to move a profile into another tenant.
+    const canUseBranch = await checkBranchAccess(
+      req.user?.id || req.user?.userId,
+      req.user?.roleName,
+      branchId,
+    );
+    if (!canUseBranch) {
+      return next(
+        new AppError("You do not have access to the target branch", 403),
+      );
+    }
+
     const updatedStaffProfile = await prisma.staffProfile.update({
       where: { userId },
       data: {
@@ -619,17 +666,16 @@ export const updateStaffProfileByUserIdPatch = async (req, res, next) => {
       userUpdateData.email = email;
     }
 
+    // Passwords are deliberately not settable here. Anyone holding
+    // UPDATE-STAFF-PROFILES for a branch could otherwise reset a colleague's
+    // (or their branch ADMIN's) password and log in as them. Password changes
+    // go through the user endpoints, which require the user scope.
     if (password !== undefined) {
-      if (!isValidPassword(password))
-        return next(
-          new AppError(
-            "Password must be at least 8 characters and contain a number and a special character",
-            400,
-          ),
-        );
-      userUpdateData.password = await bcrypt.hash(
-        password,
-        parseInt(process.env.SALT_ROUNDS),
+      return next(
+        new AppError(
+          "Password cannot be changed here — use the user update endpoint",
+          400,
+        ),
       );
     }
 
@@ -645,6 +691,21 @@ export const updateStaffProfileByUserIdPatch = async (req, res, next) => {
     if (branchId) {
       const branch = await prisma.branch.findUnique({ where: { id: branchId } });
       if (!branch) return next(new AppError("Branch not found", 404));
+
+      // checkOwnership validated the PRE-update branch. Without this, a staff
+      // member could move their own profile into another tenant's branch and
+      // inherit access to that tenant's devices, visits, orders and customers.
+      const canUseBranch = await checkBranchAccess(
+        req.user?.id || req.user?.userId,
+        req.user?.roleName,
+        branchId,
+      );
+      if (!canUseBranch) {
+        return next(
+          new AppError("You do not have access to the target branch", 403),
+        );
+      }
+
       updateData.branchId = branchId;
     }
 

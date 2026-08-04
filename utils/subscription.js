@@ -27,13 +27,25 @@ export const resolveFallbackPlanId = async (prismaClient = prisma) => {
   return fallbackPlan.id;
 };
 
+/**
+ * Adds one billing interval, clamped to the last day of the target month.
+ *
+ * setMonth overflows: Jan 31 + 1 month lands on Mar 3, so a customer who
+ * subscribed on the 31st skipped February entirely and the same date could be
+ * billed as belonging to two periods. Same for Feb 29 + 1 year.
+ */
 export const addBillingInterval = (date, billingInterval) => {
-  const result = new Date(date);
-  if (billingInterval === "YEARLY") {
-    result.setFullYear(result.getFullYear() + 1);
-  } else {
-    result.setMonth(result.getMonth() + 1);
-  }
+  const source = new Date(date);
+  const monthsToAdd = billingInterval === "YEARLY" ? 12 : 1;
+
+  const targetYear = source.getFullYear() + Math.floor((source.getMonth() + monthsToAdd) / 12);
+  const targetMonth = (source.getMonth() + monthsToAdd) % 12;
+
+  // Day 0 of the following month is the last day of the target month.
+  const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+
+  const result = new Date(source);
+  result.setFullYear(targetYear, targetMonth, Math.min(source.getDate(), lastDayOfTargetMonth));
   return result;
 };
 

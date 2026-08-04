@@ -118,6 +118,11 @@ export const PERMISSIONS = [
   { name: "UPDATE-EQUIPMENT", description: "Update equipment" },
   { name: "DELETE-EQUIPMENT", description: "Delete equipment" },
 
+  { name: "CREATE-GAME-MODES", description: "Create game modes" },
+  { name: "VIEW-GAME-MODES", description: "View game modes" },
+  { name: "UPDATE-GAME-MODES", description: "Update game modes" },
+  { name: "DELETE-GAME-MODES", description: "Delete game modes" },
+
   { name: "VIEW-USERS", description: "View users" },
   { name: "UPDATE-USERS", description: "Update users" },
   { name: "DELETE-USERS", description: "Delete users" },
@@ -203,6 +208,9 @@ const STAFF_PERMISSIONS = [
   // Units & Equipment
   "VIEW-UNITS",
   "VIEW-EQUIPMENT",
+
+  // Game modes — staff render the SGL/DBL switcher on the session screen
+  "VIEW-GAME-MODES",
 
   // Pricing Rules (view only)
   "VIEW-PRICING-RULES",

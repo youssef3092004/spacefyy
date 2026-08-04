@@ -16,6 +16,9 @@ const INVOICE_SELECT = {
   paymentMethod: true,
   paidAt: true,
   order: { select: { totalPrice: true } },
+  // A visit invoice covers sessions AND everything ordered at the table, so
+  // its orders are needed to split the two apart — see applyInvoiceToMetrics.
+  visit: { select: { orders: { select: { totalPrice: true } } } },
 };
 
 export const emptyDayMetrics = () => ({
@@ -39,7 +42,19 @@ const applyInvoiceToMetrics = (acc, inv) => {
     : Number(inv.order?.totalPrice ?? inv.finalAmount ?? 0);
 
   if (inv.visitId) {
-    acc.sessionRevenue += net;
+    // A visit invoice's gross is sessionTotal + orderTotal (visit.js), so
+    // bucketing all of it as session revenue hid every product sold at a
+    // table. Discounts apply to the invoice as a whole, so the net is split
+    // in the same proportion as the gross.
+    const orderGross = (inv.visit?.orders ?? []).reduce(
+      (sum, order) => sum + Number(order.totalPrice ?? 0),
+      0,
+    );
+    const productShare = gross > 0 ? Math.min(orderGross / gross, 1) : 0;
+    const productNet = net * productShare;
+
+    acc.productRevenue += productNet;
+    acc.sessionRevenue += net - productNet;
   } else {
     acc.productRevenue += net;
   }

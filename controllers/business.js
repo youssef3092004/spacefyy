@@ -197,6 +197,11 @@ export const deleteBusinessById = async (req, res, next) => {
 
 export const deleteAllBusinesses = async (req, res, next) => {
   try {
+    if (req.user.roleName !== "DEVELOPER") {
+      return next(
+        new AppError("Forbidden: Only DEVELOPER can perform this action", 403),
+      );
+    }
     const deletedBusinesses = await prisma.business.deleteMany({});
     if (deletedBusinesses.count === 0) {
       return next(new AppError("No businesses to delete", 404));

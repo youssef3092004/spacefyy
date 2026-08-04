@@ -1,7 +1,11 @@
+import process from "process";
 import { prisma } from "../configs/db.js";
 import { redisClient } from "../configs/redis.js";
 import { AppError } from "../utils/appError.js";
 import { pagination } from "../utils/pagination.js";
+
+// Where users land when their role is deleted. Lowest-privilege by design.
+const FALLBACK_ROLE_NAME = process.env.FALLBACK_ROLE_NAME || "CUSTOMER";
 
 export const createRole = async (req, res, next) => {
   try {
@@ -113,13 +117,36 @@ export const deleteRoleById = async (req, res, next) => {
     if (!id) {
       return next(new AppError("Role ID is required", 400));
     }
-    const allUsersWithRole = await prisma.user.updateMany({
-      where: { roleId: id },
-      data: { roleId: "5b780541-22ba-4b2c-a100-c677f41eaf9c" },
+    // Look the fallback up by name. The previous hardcoded UUID was
+    // environment-specific: in any other database it either failed the foreign
+    // key or silently moved every affected user into whatever role owned it.
+    const fallbackRole = await prisma.role.findUnique({
+      where: { name: FALLBACK_ROLE_NAME },
+      select: { id: true },
     });
-    const role = await prisma.role.delete({
-      where: { id },
-    });
+    if (!fallbackRole) {
+      return next(
+        new AppError(
+          `Cannot delete this role: the fallback role "${FALLBACK_ROLE_NAME}" does not exist. Create it first.`,
+          409,
+        ),
+      );
+    }
+    if (fallbackRole.id === id) {
+      return next(
+        new AppError(`Cannot delete the fallback role "${FALLBACK_ROLE_NAME}"`, 409),
+      );
+    }
+
+    // One transaction: a reassignment that commits without the delete leaves
+    // every affected user demoted for no reason.
+    const [allUsersWithRole, role] = await prisma.$transaction([
+      prisma.user.updateMany({
+        where: { roleId: id },
+        data: { roleId: fallbackRole.id },
+      }),
+      prisma.role.delete({ where: { id } }),
+    ]);
     if (!role) {
       return next(new AppError("Role not found", 404));
     }

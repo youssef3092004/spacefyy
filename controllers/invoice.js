@@ -103,6 +103,16 @@ export const createInvoice = async (req, res, next) => {
       message = "Visit closed and invoice created successfully";
     } else if (visit.status === "CANCELLED") {
       return next(new AppError("Cannot invoice a CANCELLED visit", 400));
+    } else if (discountAmount !== undefined && discountAmount !== null) {
+      // The visit is already closed, so the discount cannot be applied without
+      // re-pricing. Fail loudly instead of returning the undiscounted invoice
+      // with a 200 that reads as success.
+      return next(
+        new AppError(
+          "Visit is already invoiced — the discount was not applied. Delete the invoice and re-close the visit to change it.",
+          409,
+        ),
+      );
     }
 
     const invoice = await prisma.invoice.findUnique({
@@ -150,18 +160,25 @@ export const payInvoice = async (req, res, next) => {
       return next(new AppError("Invoice is already PAID", 400));
 
     const paidInvoice = await prisma.$transaction(async (tx) => {
-      const updated = await tx.invoice.update({
-        where: { visitId },
+      // Guard the write on UNPAID so a concurrent retry cannot re-stamp paidAt
+      // and shiftId — that would move the payment into a later shift and leave
+      // the earlier one with a false cash variance.
+      const { count } = await tx.invoice.updateMany({
+        where: { id: invoice.id, status: "UNPAID" },
         data: {
           status: "PAID",
           paidAt: new Date(),
           paymentMethod,
           ...(req.openShift ? { shiftId: req.openShift.id } : {}),
         },
-        include: INVOICE_INCLUDE,
       });
 
-      return updated;
+      if (count === 0) throw new AppError("Invoice is already PAID", 409);
+
+      return tx.invoice.findUnique({
+        where: { id: invoice.id },
+        include: INVOICE_INCLUDE,
+      });
     });
 
     invalidateOrderRelatedCaches();
@@ -200,18 +217,22 @@ export const payInvoiceById = async (req, res, next) => {
       return next(new AppError("Invoice is already PAID", 400));
 
     const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.invoice.update({
-        where: { id: invoiceId },
+      const { count } = await tx.invoice.updateMany({
+        where: { id: invoiceId, status: "UNPAID" },
         data: {
           status: "PAID",
           paidAt: new Date(),
           paymentMethod,
           ...(req.openShift ? { shiftId: req.openShift.id } : {}),
         },
-        include: INVOICE_INCLUDE,
       });
 
-      return result;
+      if (count === 0) throw new AppError("Invoice is already PAID", 409);
+
+      return tx.invoice.findUnique({
+        where: { id: invoiceId },
+        include: INVOICE_INCLUDE,
+      });
     });
 
     invalidateOrderRelatedCaches();
@@ -307,7 +328,12 @@ export const createOrderInvoice = async (req, res, next) => {
         branchId: true,
         status: true,
         visitId: true,
+        totalPrice: true,
         finalPrice: true,
+        discountType: true,
+        discountAmount: true,
+        customerDiscountType: true,
+        customerDiscountAmount: true,
       },
     });
 
@@ -330,14 +356,20 @@ export const createOrderInvoice = async (req, res, next) => {
     if (existing)
       return next(new AppError("Invoice already exists for this order", 409));
 
-    const totalAmount = Number(order.finalPrice);
+    // Mirror the visit-invoice shape: totalAmount is the PRE-discount total and
+    // finalAmount is what's actually owed, so the receipt can print a discount
+    // line and reportAggregation's `gross - net` stays truthful.
     const invoice = await prisma.$transaction(async (tx) => {
       const createdInvoice = await tx.invoice.create({
         data: {
           orderId,
           branchId: order.branchId,
-          totalAmount,
-          finalAmount: totalAmount,
+          totalAmount: Number(order.totalPrice),
+          discountType: order.discountType,
+          discountAmount: Number(order.discountAmount),
+          customerDiscountType: order.customerDiscountType,
+          customerDiscountAmount: Number(order.customerDiscountAmount),
+          finalAmount: Number(order.finalPrice),
           status: "UNPAID",
         },
         include: INVOICE_INCLUDE,
@@ -376,7 +408,7 @@ export const deleteInvoice = async (req, res, next) => {
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId },
-      select: { id: true, visitId: true, status: true },
+      select: { id: true, visitId: true, orderId: true, status: true },
     });
 
     if (!invoice) return next(new AppError("Invoice not found", 404));
@@ -387,10 +419,21 @@ export const deleteInvoice = async (req, res, next) => {
     await prisma.$transaction(async (tx) => {
       await tx.invoice.delete({ where: { id: invoiceId } });
 
-      await tx.visit.updateMany({
-        where: { id: invoice.visitId, status: "INVOICED" },
-        data: { status: "ACTIVE" },
-      });
+      if (invoice.visitId) {
+        await tx.visit.updateMany({
+          where: { id: invoice.visitId, status: "INVOICED" },
+          data: { status: "ACTIVE" },
+        });
+      }
+
+      // A standalone order invoice leaves the order INVOICED; without this the
+      // order can never be re-invoiced ("not completed") nor edited ("finalized").
+      if (invoice.orderId) {
+        await tx.order.updateMany({
+          where: { id: invoice.orderId, status: "INVOICED" },
+          data: { status: "COMPLETED" },
+        });
+      }
     });
 
     invalidateOrderRelatedCaches();

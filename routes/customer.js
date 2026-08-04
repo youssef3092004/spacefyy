@@ -21,11 +21,18 @@ import { cacheMiddleware } from "../middleware/cache.js";
 import { upload } from "../configs/multer.js";
 const router = Router();
 
+const ownsBranch = checkOwnership({
+  model: "branch",
+  paramId: "branchId",
+  scope: "branch",
+});
+
 router.post(
   "/create/:branchId",
   verifyToken,
   upload.none(),
   checkPermission("CREATE_CUSTOMER"),
+  ownsBranch,
   createCustomer,
 );
 
@@ -43,10 +50,17 @@ router.get(
   getAllCustomers,
 );
 
+const ownsCustomer = checkOwnership({
+  model: "customer",
+  paramId: "customerId",
+  scope: "tenant",
+});
+
 router.get(
   "/getById/:customerId",
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
+  ownsCustomer,
   cacheMiddleware((req) => {
     const q = req.query;
     return [
@@ -87,6 +101,7 @@ router.get(
   "/getByBranchId/:branchId",
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
+  ownsBranch,
   getCustomersHistoryByBranchId,
 );
 
@@ -94,6 +109,7 @@ router.get(
   "/monthly-stats/:branchId",
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
+  ownsBranch,
   getBranchMonthlyStats,
 );
 
@@ -101,6 +117,7 @@ router.get(
   "/:customerId/analytics",
   verifyToken,
   checkPermission("VIEW_CUSTOMER"),
+  ownsCustomer,
   cacheMiddleware(
     (req) => `customer:analytics:${req.params.customerId}`,
     "TTL_BY_ID",
@@ -113,6 +130,7 @@ router.patch(
   verifyToken,
   upload.none(),
   checkPermission("UPDATE_CUSTOMER"),
+  ownsCustomer,
   updateCustomerByIdPatch,
 );
 
@@ -121,6 +139,7 @@ router.patch(
   verifyToken,
   upload.none(),
   checkPermission("UPDATE_CUSTOMER"),
+  ownsCustomer,
   blockCustomer,
 );
 
@@ -128,6 +147,7 @@ router.patch(
   "/unblock/:customerId",
   verifyToken,
   checkPermission("UPDATE_CUSTOMER"),
+  ownsCustomer,
   unblockCustomer,
 );
 
@@ -135,6 +155,7 @@ router.delete(
   "/delete/:customerId",
   verifyToken,
   checkPermission("DELETE_CUSTOMER"),
+  ownsCustomer,
   deleteCustomerById,
 );
 

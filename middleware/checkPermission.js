@@ -1,6 +1,7 @@
 import { AppError } from "../utils/appError.js";
 import { formatPermission } from "../utils/formatPermission.js";
 import { hasPermission } from "../utils/hasPermission.js";
+import { checkBranchAccess } from "../utils/checkBranchAccess.js";
 
 /**
  * Permission check middleware
@@ -46,6 +47,22 @@ export const checkPermission = (permissionName, requireBranchId = false) => {
               `branchId is required for permission: ${permissionName}`,
               400,
             ),
+          );
+        }
+      }
+
+      // hasPermission answers "does this user hold the permission", and falls
+      // back to their role-wide grant when no branch-specific row exists — so
+      // on its own it never established that the branch is theirs to touch.
+      if (branchId) {
+        const hasAccess = await checkBranchAccess(
+          userId || req.user?.id,
+          roleName,
+          branchId,
+        );
+        if (!hasAccess) {
+          return next(
+            new AppError("You do not have access to this branch", 403),
           );
         }
       }

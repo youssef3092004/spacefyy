@@ -16,6 +16,50 @@ const MAX_PAGE_LIMIT = 100;
 export const roundMoney = (value) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+/**
+ * Canonical field set returned for a session component.
+ *
+ * Lives here rather than in a controller so the game-mode engine and the
+ * session controllers cannot drift apart — and so importing it never creates a
+ * cycle back into a controller.
+ */
+export const SESSION_COMPONENT_SELECT = {
+  id: true,
+  sessionId: true,
+  branchId: true,
+  resourceType: true,
+  resourceId: true,
+  pricingRuleId: true,
+  priceType: true,
+  unitPrice: true,
+  quantity: true,
+  gamesCount: true,
+  players: true,
+  modeLabel: true,
+  gameModeId: true,
+  autoManaged: true,
+  startedAt: true,
+  endedAt: true,
+  durationMinutes: true,
+  totalPrice: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+// Rounds to the nearest 10, except amounts already an exact multiple of 5
+// (e.g. 55) which are left as-is: 52 -> 50, 55 -> 55, 56 -> 60.
+//
+// Anything below 10 is returned exactly: there is no ten to round to, and
+// rounding down would bill a real 4 EGP charge as 0.
+export const roundToNearestTen = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (n < 10) return roundMoney(n);
+  const remainder = ((n % 5) + 5) % 5;
+  if (remainder < 1e-9 || 5 - remainder < 1e-9) return roundMoney(n);
+  return Math.round(n / 10) * 10;
+};
+
 export const normalizeSessionResourceType = (resourceType) => {
   const normalized = String(resourceType || "").toUpperCase();
   if (!SessionResourceType.includes(normalized)) {
@@ -84,6 +128,20 @@ export const calculateDurationMinutes = (startedAt, endedAt) => {
   return Math.ceil((end.getTime() - start.getTime()) / 60000);
 };
 
+// Reject a PER_GAME component that carries no game count, at the point where
+// the caller can still supply one. Enforcing this at billing time instead left
+// the visit permanently un-closeable.
+export const assertGamesCountForPriceType = (priceType, gamesCount) => {
+  if (normalizeSessionPriceType(priceType) !== "PER_GAME") return;
+  const games = Number(gamesCount);
+  if (!Number.isInteger(games) || games < 1) {
+    throw new AppError(
+      "gamesCount must be a positive integer for PER_GAME pricing",
+      400,
+    );
+  }
+};
+
 // Core pricing formula for a single session component.
 // quantity handles multi-unit resources (e.g. 2 controllers).
 export const calculateComponentPrice = ({
@@ -99,10 +157,13 @@ export const calculateComponentPrice = ({
   const qty = Math.max(1, Number(quantity) || 1);
 
   if (type === "PER_GAME") {
-    const games = Number(gamesCount);
-    if (!Number.isInteger(games) || games < 1) {
-      throw new AppError("gamesCount must be a positive integer for PER_GAME pricing", 400);
-    }
+    // Billed as at least one game. Throwing here used to make the whole visit
+    // un-closeable (the resource stayed reserved and the money uncollectable),
+    // so gamesCount is now validated at component-creation time instead — see
+    // assertGamesCountForPriceType.
+    const parsedGames = Number(gamesCount);
+    const games =
+      Number.isInteger(parsedGames) && parsedGames >= 1 ? parsedGames : 1;
     return roundMoney(price * qty * games);
   }
 

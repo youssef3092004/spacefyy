@@ -8,7 +8,7 @@ import {
   logout,
   forgetPassword,
 } from "../controllers/auth.js";
-import { verifyToken } from "../middleware/auth.js";
+import { verifyToken, verifyTokenIfPresent } from "../middleware/auth.js";
 import { checkPermission } from "../middleware/checkPermission.js";
 import { checkOwnership } from "../middleware/checkOwnership.js";
 import { upload } from "../middleware/multer.js";
@@ -18,6 +18,7 @@ const router = Router();
 router.post(
   "/registerOwner",
   verifyToken,
+  checkPermission("REGISTER-OWNER"),
   upload.single("profileImage"),
   registerOwner,
 );
@@ -35,8 +36,11 @@ router.post(
   upload.single("profileImage"),
   registerStaff,
 );
+// Auth is enforced inside the handler: unauthenticated only while no DEVELOPER
+// exists yet (first-run bootstrap), DEVELOPER-only thereafter.
 router.post(
   "/registerDeveloper",
+  verifyTokenIfPresent,
   upload.single("profileImage"),
   registerDeveloper,
 );

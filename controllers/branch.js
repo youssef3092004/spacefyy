@@ -8,6 +8,7 @@ import {
 } from "../utils/storageUsage.js";
 import { invalidateCacheByPattern } from "../utils/cacheInvalidation.js";
 import { messages } from "../locales/message.js";
+import { getAccessibleBusinessIds } from "../utils/checkBranchAccess.js";
 
 const timeToDate = (time) => {
   return new Date(`2026-01-01T${time}:00.000Z`);
@@ -128,7 +129,16 @@ export const getAllBranches = async (req, res, next) => {
   try {
     const { page, limit, skip, sort, order } = pagination(req);
 
+    // Unscoped, this handed every caller the branch ids of every tenant on the
+    // platform. DEVELOPER (null) is the only role that sees across businesses.
+    const businessIds = await getAccessibleBusinessIds(
+      req.user?.id || req.user?.userId,
+      req.user?.roleName,
+    );
+    const where = businessIds === null ? {} : { businessId: { in: businessIds } };
+
     const branches = await prisma.branch.findMany({
+      where,
       skip,
       take: limit,
       orderBy: { [sort]: order },
@@ -145,7 +155,7 @@ export const getAllBranches = async (req, res, next) => {
     const total =
       page === 1 && branches.length < limit
         ? branches.length
-        : await prisma.branch.count();
+        : await prisma.branch.count({ where });
 
     const totalPages = Math.ceil(total / limit);
     res.status(200).json({

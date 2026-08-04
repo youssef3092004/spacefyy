@@ -2,6 +2,7 @@ import cron from "node-cron";
 import process from "process";
 import { prisma } from "../configs/db.js";
 import { computeDailyBranchAggregate } from "./reportAggregation.js";
+import { withCronLock } from "./cronLock.js";
 
 export const computeAndStoreBranchDailyReport = async (branchId, date) => {
   const dayStart = new Date(
@@ -18,7 +19,10 @@ export const computeAndStoreBranchDailyReport = async (branchId, date) => {
   });
 };
 
-export const runDailyBranchReports = async () => {
+export const runDailyBranchReports = async () =>
+  withCronLock("DailyReportCron", runDailyBranchReportsUnlocked);
+
+const runDailyBranchReportsUnlocked = async () => {
   const now = new Date();
   // Always snapshot yesterday (UTC) — today isn't finished yet.
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
