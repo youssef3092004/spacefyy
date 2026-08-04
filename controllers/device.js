@@ -7,6 +7,7 @@ import {
 } from "../utils/storageUsage.js";
 import { redisClient } from "../configs/redis.js";
 import { compressAndUpload } from "../utils/cloudinary.js";
+import { assertResourceNotInUse } from "../utils/resourceAvailability.js";
 import { invalidateSpaceCache } from "./spaceAvailability.js";
 
 const DeviceType = [
@@ -501,6 +502,11 @@ export const deleteDeviceById = async (req, res, next) => {
     }
 
     await prisma.$transaction(async (tx) => {
+      await assertResourceNotInUse(tx, {
+        resourceType: "DEVICE",
+        resourceId: deviceId,
+      });
+
       await tx.device.update({
         where: { id: deviceId },
         data: {

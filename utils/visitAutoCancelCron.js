@@ -1,18 +1,25 @@
 import cron from "node-cron";
 import process from "process";
 import { prisma } from "../configs/db.js";
+import { withCronLock } from "./cronLock.js";
 
 const AUTO_CANCEL_AFTER_MINUTES =
   parseInt(process.env.AUTO_CANCEL_AFTER_MINUTES) || 30;
 
-export const runVisitAutoCancel = async () => {
+export const runVisitAutoCancel = async () =>
+  withCronLock("VisitAutoCancelCron", runVisitAutoCancelUnlocked);
+
+const runVisitAutoCancelUnlocked = async () => {
   const cutoff = new Date(Date.now() - AUTO_CANCEL_AFTER_MINUTES * 60 * 1000);
 
   const staleVisits = await prisma.visit.findMany({
     where: {
       status: "ACTIVE",
       startedAt: { lte: cutoff },
-      sessions: { none: {} },
+      // `none: {}` counted soft-deleted sessions as existing, so a visit whose
+      // only session was deleted was excluded from the sweep forever — and
+      // ensureCanStartVisit then rejected every future visit for that customer.
+      sessions: { none: { deletedAt: null } },
       orders: { none: {} },
     },
     select: { id: true },
@@ -27,8 +34,12 @@ export const runVisitAutoCancel = async () => {
 
   for (const visit of staleVisits) {
     try {
-      await prisma.visit.update({
-        where: { id: visit.id },
+      // Guarded on ACTIVE: the read above happens once, but the loop can run
+      // for a while. Without it, a visit invoiced in between was overwritten
+      // as CANCELLED with totalPrice 0 while holding a live UNPAID invoice,
+      // and revenue reports (which skip CANCELLED) silently dropped it.
+      const { count } = await prisma.visit.updateMany({
+        where: { id: visit.id, status: "ACTIVE" },
         data: {
           status: "CANCELLED",
           endedAt: cancelledAt,
@@ -36,7 +47,7 @@ export const runVisitAutoCancel = async () => {
           totalPrice: 0,
         },
       });
-      cancelled += 1;
+      if (count > 0) cancelled += 1;
     } catch (err) {
       failedIds.push(visit.id);
       console.error(

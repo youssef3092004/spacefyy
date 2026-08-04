@@ -10,19 +10,37 @@ const COMPUTED_SORT_FIELDS = [
 
 export const isComputedSort = (sort) => COMPUTED_SORT_FIELDS.includes(sort);
 
-export const pagination = (req) => {
-  const allowedSortFields = [
-    "createdAt",
-    "email",
-    "updatedAt",
-    "name",
-    "totalSpent",
-    "lastBookingAt",
-  ];
+// createdAt is on every model and is the default sort, so it is always allowed.
+// updatedAt is not universal (Payroll has none), so it stays opt-in.
+const UNIVERSAL_SORT_FIELDS = ["createdAt"];
+
+const DEFAULT_SORT_FIELDS = [
+  ...UNIVERSAL_SORT_FIELDS,
+  "updatedAt",
+  "email",
+  "name",
+  "totalSpent",
+  "lastBookingAt",
+];
+
+/**
+ * @param {object} req
+ * @param {object} [options]
+ * @param {string[]} [options.allowedSortFields] Overrides the default list for
+ *   models that don't have name/email — Payroll and Subscription have neither,
+ *   so `?sort=email` there reached Prisma and became a 500.
+ */
+export const pagination = (req, { allowedSortFields } = {}) => {
+  const sortFields = allowedSortFields
+    ? [...new Set([...UNIVERSAL_SORT_FIELDS, ...allowedSortFields])]
+    : DEFAULT_SORT_FIELDS;
   const allowedOrder = ["asc", "desc"];
 
-  if (req.query.sort && !allowedSortFields.includes(req.query.sort)) {
-    throw new AppError("Invalid sort field", 400);
+  if (req.query.sort && !sortFields.includes(req.query.sort)) {
+    throw new AppError(
+      `Invalid sort field. Allowed: ${sortFields.join(", ")}`,
+      400,
+    );
   }
 
   if (

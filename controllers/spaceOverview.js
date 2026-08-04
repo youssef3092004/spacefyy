@@ -36,6 +36,7 @@ export const buildSpacesOverviewData = async (branchId) => {
         customTypeLabel: true,
         image: true,
         capacity: true,
+        bookingCapacity: true,
         availableNumber: true,
         priceType: true,
         price: true,
@@ -114,30 +115,52 @@ export const buildSpacesOverviewData = async (branchId) => {
     }),
   ]);
 
-  const activeCustomerByResource = new Map();
-  const activeVisitByResource = new Map();
+  // A PUBLIC space with bookingCapacity > 1 holds several concurrent
+  // customers, so these are lists. Keeping only the first one seen showed one
+  // arbitrary customer and no sign that the others were even there.
+  const activeCustomersByResource = new Map();
+  const activeVisitsByResource = new Map();
   for (const component of sessionComponentsActive) {
     const visit = component.session?.visit;
     if (!visit) continue;
     const key = `${component.resourceType}:${component.resourceId}`;
-    if (visit.customer && !activeCustomerByResource.has(key)) {
-      activeCustomerByResource.set(key, visit.customer);
+
+    if (visit.customer) {
+      const customers = activeCustomersByResource.get(key) ?? [];
+      if (!customers.some((c) => c.id === visit.customer.id)) {
+        customers.push(visit.customer);
+      }
+      activeCustomersByResource.set(key, customers);
     }
-    if (!activeVisitByResource.has(key)) {
-      activeVisitByResource.set(key, visit.id);
-    }
+
+    const visits = activeVisitsByResource.get(key) ?? [];
+    if (!visits.includes(visit.id)) visits.push(visit.id);
+    activeVisitsByResource.set(key, visits);
   }
 
   const emptyCustomer = { id: "", name: "" };
   const publicMap = new Map();
   for (const p of publicSpacesWithRelations) publicMap.set(p.id, p);
 
-  const getActiveCustomer = (resourceType, resourceId) =>
-    activeCustomerByResource.get(`${resourceType}:${resourceId}`) ||
-    emptyCustomer;
+  const getActiveCustomers = (resourceType, resourceId) =>
+    activeCustomersByResource.get(`${resourceType}:${resourceId}`) ?? [];
 
-  const getActiveVisitId = (resourceType, resourceId) =>
-    activeVisitByResource.get(`${resourceType}:${resourceId}`) || null;
+  const getActiveVisitIds = (resourceType, resourceId) =>
+    activeVisitsByResource.get(`${resourceType}:${resourceId}`) ?? [];
+
+  // `customer`/`visitId` stay in the payload for existing clients (the first
+  // holder); `customers`/`visitIds` carry the full set.
+  const occupancyOf = (resourceType, resourceId) => {
+    const customers = getActiveCustomers(resourceType, resourceId);
+    const visitIds = getActiveVisitIds(resourceType, resourceId);
+    return {
+      customer: customers[0] ?? emptyCustomer,
+      customers,
+      visitId: visitIds[0] ?? null,
+      visitIds,
+      activeHolders: visitIds.length,
+    };
+  };
 
   const assembledSpaces = spacesBasic.map((s) => {
     if (s.type === "PUBLIC" && publicMap.has(s.id)) {
@@ -146,32 +169,22 @@ export const buildSpacesOverviewData = async (branchId) => {
         ...s,
         devices: (pub.devices || []).map((device) => ({
           ...device,
-          ...(device.isBusy
-            ? {
-                customer: getActiveCustomer("DEVICE", device.id),
-                visitId: getActiveVisitId("DEVICE", device.id),
-              }
-            : {}),
+          ...(device.isBusy ? occupancyOf("DEVICE", device.id) : {}),
         })),
         units: (pub.units || []).map((unit) => ({
           ...unit,
-          ...(unit.isBusy
-            ? {
-                customer: getActiveCustomer("UNIT", unit.id),
-                visitId: getActiveVisitId("UNIT", unit.id),
-              }
-            : {}),
+          ...(unit.isBusy ? occupancyOf("UNIT", unit.id) : {}),
         })),
+        // A PUBLIC space is directly bookable too (POST /sessions/create with
+        // a spaceId), so it can be occupied independently of its devices/units.
+        ...(getActiveVisitIds("SPACE", s.id).length
+          ? occupancyOf("SPACE", s.id)
+          : {}),
       };
     }
     return {
       ...s,
-      ...(s.isBusy
-        ? {
-            customer: getActiveCustomer("SPACE", s.id),
-            visitId: getActiveVisitId("SPACE", s.id),
-          }
-        : {}),
+      ...(s.isBusy ? occupancyOf("SPACE", s.id) : {}),
     };
   });
 
@@ -198,6 +211,18 @@ export const buildSpacesOverviewData = async (branchId) => {
       spacesOccupied +=
         devices.filter((d) => d.isBusy).length +
         units.filter((u) => u.isBusy).length;
+
+      // A PUBLIC space with no devices or units is still bookable on its own,
+      // and used to contribute 0 to both totals — invisible in the metrics
+      // while customers were sitting in it.
+      if (devices.length === 0 && units.length === 0) {
+        const capacity = s.bookingCapacity ?? 1;
+        spacesTotal += capacity;
+        spacesOccupied += Math.min(
+          capacity,
+          getActiveVisitIds("SPACE", s.id).length,
+        );
+      }
     } else {
       spacesTotal += 1;
       if (s.isBusy) spacesOccupied += 1;

@@ -32,7 +32,9 @@ export const hasPermission = async (
 
     const permissionId = await getPermissionId(permissionName);
     if (!permissionId) {
-      next(new AppError(`Permission ${permissionName} not found`, 404));
+      // `next` is optional: callers outside the middleware chain (permission
+      // granting, for one) just want the boolean.
+      if (next) next(new AppError(`Permission ${permissionName} not found`, 404));
       return false;
     }
 
@@ -74,6 +76,7 @@ export const hasPermission = async (
     }
     return false;
   } catch (error) {
-    next(error);
+    if (next) return next(error);
+    throw error;
   }
 };

@@ -2,40 +2,42 @@ import cron from "node-cron";
 import process from "process";
 import { prisma } from "../configs/db.js";
 import { recordStorageSnapshot, updateStorageUsage } from "./storageUsage.js";
+import { withCronLock } from "./cronLock.js";
 
-export const runWeeklyStorageUsageSnapshot = async () => {
-  const businesses = await prisma.business.findMany({
-    select: { id: true },
-  });
+export const runWeeklyStorageUsageSnapshot = async () =>
+  withCronLock("StorageUsageCron", async () => {
+    const businesses = await prisma.business.findMany({
+      select: { id: true },
+    });
 
-  if (!businesses.length) {
-    console.log("[StorageUsageCron] No businesses found. Skipping snapshot.");
-    return { total: 0, success: 0, failed: 0 };
-  }
-
-  let success = 0;
-  let failed = 0;
-
-  for (const business of businesses) {
-    try {
-      await updateStorageUsage(business.id);
-      await recordStorageSnapshot(business.id);
-      success += 1;
-    } catch (error) {
-      failed += 1;
-      console.error(
-        `[StorageUsageCron] Snapshot failed for business ${business.id}:`,
-        error,
-      );
+    if (!businesses.length) {
+      console.log("[StorageUsageCron] No businesses found. Skipping snapshot.");
+      return { total: 0, success: 0, failed: 0 };
     }
-  }
 
-  console.log(
-    `[StorageUsageCron] Weekly snapshot completed. total=${businesses.length}, success=${success}, failed=${failed}`,
-  );
+    let success = 0;
+    let failed = 0;
 
-  return { total: businesses.length, success, failed };
-};
+    for (const business of businesses) {
+      try {
+        await updateStorageUsage(business.id);
+        await recordStorageSnapshot(business.id);
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        console.error(
+          `[StorageUsageCron] Snapshot failed for business ${business.id}:`,
+          error,
+        );
+      }
+    }
+
+    console.log(
+      `[StorageUsageCron] Weekly snapshot completed. total=${businesses.length}, success=${success}, failed=${failed}`,
+    );
+
+    return { total: businesses.length, success, failed };
+  });
 
 export const startStorageUsageCron = () => {
   const enabled = process.env.ENABLE_STORAGE_USAGE_CRON !== "false";

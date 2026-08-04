@@ -26,6 +26,16 @@ const resolveLocalDay = (dateStr) => {
   return isNaN(parsed) ? startOfLocalDay() : startOfLocalDay(parsed);
 };
 
+// `date` holds a local-midnight instant computed with whatever UTC offset was
+// in force when the shift was opened. Under DST that offset changes, so the
+// same calendar day recomputed later is a different instant and exact-equality
+// matching silently returns nothing. Adjacent local midnights are ~24h apart,
+// so a ±12h window identifies exactly one calendar day under any offset.
+const localDayWindow = (day) => ({
+  gte: new Date(day.getTime() - 12 * 60 * 60 * 1000),
+  lt: new Date(day.getTime() + 12 * 60 * 60 * 1000),
+});
+
 const SHIFT_INCLUDE = {
   openedBy: { select: { id: true, name: true } },
   closedBy: { select: { id: true, name: true } },
@@ -128,43 +138,66 @@ export const openShift = async (req, res, next) => {
     const maxShiftsPerDay = branch.business?.plan?.maxShiftsPerDay ?? null;
     const day = startOfLocalDay();
 
-    // Count + create inside one transaction so two concurrent "open" clicks
-    // can't both pass the limit/one-open checks or claim the same shiftNumber.
-    // The @@unique([branchId, date, shiftNumber]) is the final backstop.
-    const shift = await prisma.$transaction(async (tx) => {
-      const alreadyOpen = await tx.shift.findFirst({
-        where: { branchId, status: "OPEN" },
-        select: { id: true, shiftNumber: true },
-      });
-      if (alreadyOpen) {
-        throw new AppError(
-          "Another shift is already open for this branch. Close it before opening a new one.",
-          400,
-        );
-      }
+    // Serializable, not the default READ COMMITTED: the "is one already open"
+    // check is a phantom read, so two concurrent opens straddling local
+    // midnight would each resolve a different `date`, sidestep the
+    // @@unique([branchId, date, shiftNumber]) backstop, and both commit —
+    // leaving two OPEN shifts on one branch and double-counting every
+    // unstamped invoice into both shifts' expected cash.
+    let shift;
+    try {
+      shift = await prisma.$transaction(
+        async (tx) => {
+          const alreadyOpen = await tx.shift.findFirst({
+            where: { branchId, status: "OPEN" },
+            select: { id: true, shiftNumber: true },
+          });
+          if (alreadyOpen) {
+            throw new AppError(
+              "Another shift is already open for this branch. Close it before opening a new one.",
+              400,
+            );
+          }
 
-      const todayCount = await tx.shift.count({ where: { branchId, date: day } });
-      if (maxShiftsPerDay !== null && todayCount >= maxShiftsPerDay) {
-        throw new AppError(
-          `Cannot open a new shift. Your plan allows ${maxShiftsPerDay} shift(s) per day (already opened today: ${todayCount}).`,
-          403,
-          { typeError: "limit" },
-        );
-      }
+          const todayCount = await tx.shift.count({
+            where: { branchId, date: localDayWindow(day) },
+          });
+          if (maxShiftsPerDay !== null && todayCount >= maxShiftsPerDay) {
+            throw new AppError(
+              `Cannot open a new shift. Your plan allows ${maxShiftsPerDay} shift(s) per day (already opened today: ${todayCount}).`,
+              403,
+              { typeError: "limit" },
+            );
+          }
 
-      return tx.shift.create({
-        data: {
-          branchId,
-          date: day,
-          shiftNumber: todayCount + 1,
-          status: "OPEN",
-          openedAt: new Date(),
-          openedById: req.user.id,
-          openingCash: openingCashNum,
+          return tx.shift.create({
+            data: {
+              branchId,
+              date: day,
+              shiftNumber: todayCount + 1,
+              status: "OPEN",
+              openedAt: new Date(),
+              openedById: req.user.id,
+              openingCash: openingCashNum,
+            },
+            include: SHIFT_INCLUDE,
+          });
         },
-        include: SHIFT_INCLUDE,
-      });
-    });
+        { isolationLevel: "Serializable" },
+      );
+    } catch (error) {
+      // P2034 = serialization failure, P2002 = the shiftNumber backstop fired.
+      // Both mean another open won the race.
+      if (error?.code === "P2034" || error?.code === "P2002") {
+        return next(
+          new AppError(
+            "Another shift was opened for this branch at the same moment. Please retry.",
+            409,
+          ),
+        );
+      }
+      throw error;
+    }
 
     res.status(201).json({
       success: true,
@@ -217,18 +250,28 @@ export const closeShift = async (req, res, next) => {
     const expectedCash = round2(openingCash + revenue.paymentBreakdown.CASH - expenses.total);
     const variance = round2(actualCashNum - expectedCash);
 
-    const updated = await prisma.shift.update({
-      where: { id: shiftId },
+    // Guarded on OPEN: the status check above ran before the aggregation, and
+    // a concurrent close would otherwise overwrite the first one's figures.
+    const claimed = await prisma.shift.updateMany({
+      where: { id: shiftId, status: "OPEN" },
       data: {
         status: "CLOSED",
         closedAt,
         closedById: req.user.id,
-        handoverNotes: handoverNotes.trim(),
+        handoverNotes: handoverNotes?.trim() || null,
         incidentNotes: incidentNotes?.trim() || null,
         actualCash: actualCashNum,
         expectedCash,
         variance,
       },
+    });
+
+    if (claimed.count === 0) {
+      return next(new AppError("Shift is no longer OPEN", 409));
+    }
+
+    const updated = await prisma.shift.findUnique({
+      where: { id: shiftId },
       include: SHIFT_INCLUDE,
     });
 
@@ -265,7 +308,7 @@ export const getTodayShifts = async (req, res, next) => {
     const { branchId } = req.params;
 
     const shifts = await prisma.shift.findMany({
-      where: { branchId, date: startOfLocalDay() },
+      where: { branchId, date: localDayWindow(startOfLocalDay()) },
       include: SHIFT_INCLUDE,
       orderBy: { shiftNumber: "asc" },
     });
@@ -320,7 +363,7 @@ export const getDailyShiftReport = async (req, res, next) => {
     const day = resolveLocalDay(req.query.date);
 
     const shifts = await prisma.shift.findMany({
-      where: { branchId, date: day },
+      where: { branchId, date: localDayWindow(day) },
       include: SHIFT_INCLUDE,
       orderBy: { shiftNumber: "asc" },
     });

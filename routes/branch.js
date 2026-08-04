@@ -97,7 +97,10 @@ router.get(
       order = "desc",
     } = req.query;
 
-    return `branches:all:page=${page}:limit=${limit}:sort=${sort}:order=${order}`;
+    // The result set is scoped to the caller's businesses, so the caller must
+    // be part of the key — otherwise one tenant's list is served to another.
+    const userId = req.user?.id || req.user?.userId;
+    return `branches:all:user=${userId}:page=${page}:limit=${limit}:sort=${sort}:order=${order}`;
   }, "TTL_LIST"),
   getAllBranches,
 );

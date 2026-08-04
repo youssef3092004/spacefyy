@@ -220,8 +220,13 @@ export const createOrderItem = async (req, res, next) => {
     const savedItem = await prisma.$transaction(async (tx) => {
       await reserveStock(tx, productId, parsedQuantity);
 
+      // Merge only into a line booked at the SAME unit price. If the product
+      // has been re-priced since, a new line is opened instead — merging would
+      // leave the row inconsistent (old unitPrice, new totalPrice), and the
+      // next quantity update would recompute totalPrice from the stale price
+      // and silently lose the difference.
       const existingItem = await tx.orderItem.findFirst({
-        where: { orderId, productId },
+        where: { orderId, productId, unitPrice },
         select: {
           id: true,
           quantity: true,

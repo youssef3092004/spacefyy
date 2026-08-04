@@ -36,6 +36,7 @@ Returns all spaces in a branch (no pagination). For PUBLIC spaces, the inner **d
         "name": "VIP Room",
         "type": "VIP",
         "capacity": 1,
+        "bookingCapacity": 1,
         "availableNumber": 0,
         "isActive": true,
         "isBusy": true,
@@ -47,6 +48,7 @@ Returns all spaces in a branch (no pagination). For PUBLIC spaces, the inner **d
         "name": "Gaming Hall",
         "type": "PUBLIC",
         "capacity": 20,
+        "bookingCapacity": 20,
         "isBusy": false,
         "devices": [
           {
@@ -116,7 +118,7 @@ Free resources (`isBusy: false`) carry neither field. The mapping only considers
 
 ## Single-use rule for non-PUBLIC spaces
 
-Only PUBLIC spaces hold multiple resources and take a `capacity` from the client. **Every other space type is single-use:** its `capacity` is always `1` and any client-supplied value is ignored on create/update. This is what makes a non-PUBLIC space's `isBusy` mean "in use" (one slot, taken = busy). See [controllers/space.js](../controllers/space.js).
+Only PUBLIC spaces hold multiple resources and take a `bookingCapacity` from the client. **Every other space type is single-use:** its `bookingCapacity` is always `1` and any client-supplied value is ignored on create/update. This is what makes a non-PUBLIC space's `isBusy` mean "in use" (one slot, taken = busy). `bookingCapacity` is the availability logic field — it seeds and caps `availableNumber`. The separate `capacity` field is a **display-only** number the frontend supplies for all space types and is never used in availability logic. See [controllers/space.js](../controllers/space.js).
 
 ---
 

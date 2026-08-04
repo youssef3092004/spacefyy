@@ -17,7 +17,25 @@
       "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\routes\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
       "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\controllers\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
       "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\middleware\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
-      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\utils\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem -Path \"D:\\\\Youssef\\\\spacefyy\\\\utils\" | Select-Object Name, @{N=\"Type\"; E={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"import\\('./task.js'\\).then\\(m=>console.log\\(m.summary\\)\\)\")",
+      "Bash(git diff *)",
+      "Bash(sed -n '/^model BranchUserPermission /,/^}/p' prisma/schema.prisma)",
+      "Bash(sed -n '/^model UserPermission /,/^}/p' prisma/schema.prisma)",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(npm run *)",
+      "Bash(node --input-type=module --env-file=.env -e ' *)",
+      "Bash(node --check controllers/equipment.js)",
+      "Bash(node --check controllers/product.js)",
+      "Bash(node --check controllers/gameMode.js)",
+      "Bash(node --check utils/cronLock.js)",
+      "Bash(sed -n '/const sessionStartedAt = parseDate/,+6p' controllers/session.js)",
+      "Bash(sed -n '/export const parseDate/,/^};/p' utils/sessionUtils.js)",
+      "Bash(node -e 'console.log\\(\"39194.67 + 59281.93 =\", \\(39194.67+59281.93\\).toFixed\\(2\\), \"| reported 98476.6\"\\); *)",
+      "Bash(sed -n '/export const requireOpenShift/,/^};/p' utils/requireOpenShift.js)",
+      "Bash(sed -n '/change-mode/,/^\\);/p' routes/session.js)",
+      "Bash(node -e 'import\\(\"./task.js\"\\).then\\(m=>console.log\\(\"exports:\",Object.keys\\(m\\),\"\\\\nsummary:\",m.summary\\)\\)')"
     ]
   }
 }

@@ -105,6 +105,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 8,
+      bookingCapacity: 1,
       availableNumber: 2,
       priceType: "PER_HOUR",
       price: 150.0,
@@ -121,6 +122,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 20,
+      bookingCapacity: 20,
       availableNumber: 5,
       priceType: "PER_HOUR",
       price: 50.0,
@@ -137,6 +139,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 50,
+      bookingCapacity: 1,
       availableNumber: 1,
       priceType: "PER_SESSION",
       price: 500.0,
@@ -155,6 +158,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 1,
+      bookingCapacity: 1,
       availableNumber: 5,
       priceType: "PER_HOUR",
       price: 25.0,
@@ -171,6 +175,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 4,
+      bookingCapacity: 1,
       availableNumber: 2,
       priceType: "PER_HOUR",
       price: 100.0,
@@ -189,6 +194,7 @@ const semiDemoData = {
       image:
         "https://media.istockphoto.com/id/1472933890/vector/no-image-vector.jpg",
       capacity: 1,
+      bookingCapacity: 1,
       availableNumber: 8,
       priceType: "PER_HOUR",
       price: 30.0,
